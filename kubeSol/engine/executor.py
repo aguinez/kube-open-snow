@@ -2,6 +2,7 @@
 from kubeSol.parser.parser import parse_sql # Updated import
 from kubeSol.engine import k8s_api # Updated import
 from kubeSol.engine import script_runner # Updated import
+import base64
 import os
 from kubeSol.constants import ( # Updated import
     ACTION_CREATE, ACTION_DELETE, ACTION_UPDATE, ACTION_GET, ACTION_LIST, ACTION_EXECUTE,
@@ -15,8 +16,53 @@ from kubernetes.client.exceptions import ApiException as K8sApiException
 
 # --- Command Handler Functions ---
 
-def _handle_create_secret(name, fields, namespace):
-    k8s_api.create_secret(name=name, data=fields, namespace=namespace)
+def _handle_create_secret(name: str, fields: dict, namespace: str):
+    """
+    Handles the CREATE SECRET command.
+    Distinguishes between plain string data and data from local files (prefixed with 'file_').
+    Calls the appropriate k8s_api function.
+    """
+    string_data_payload = {}
+    b64_data_payload = {} 
+    has_file_fields = False
+
+    for key, value in fields.items():
+        if key.startswith("file_"):
+            has_file_fields = True
+            actual_key_in_secret = key[len("file_"):]
+            if not actual_key_in_secret: 
+                print(f"⚠️ Invalid key format for file-based secret data: '{key}'. Must be 'file_yourKeyName'. Skipping.")
+                continue
+            
+            local_file_path = value
+            try:
+                print(f"ℹ️ Reading content for secret key '{actual_key_in_secret}' from file: {local_file_path}")
+                with open(local_file_path, 'rb') as f_stream: 
+                    file_content_bytes = f_stream.read()
+                b64_data_payload[actual_key_in_secret] = base64.b64encode(file_content_bytes).decode('utf-8')
+            except FileNotFoundError:
+                raise ValueError(f"File not found at path: '{local_file_path}' for secret key '{actual_key_in_secret}'.")
+            except Exception as e:
+                raise ValueError(f"Error reading file '{local_file_path}' for secret key '{actual_key_in_secret}': {e}")
+        else:
+            string_data_payload[key] = value
+    
+    if has_file_fields or not string_data_payload: # If there are file fields, or if it's only file_fields (string_data_payload empty)
+                                                # or if both are present.
+        k8s_api.create_secret_with_mixed_data(
+            name=name,
+            string_data_payload=string_data_payload if string_data_payload else None,
+            b64_data_payload=b64_data_payload if b64_data_payload else None, # Will be populated if file_ fields existed
+            namespace=namespace
+        )
+    else:
+        # Only string data fields were provided, use the original create_secret
+        # This path is taken if fields contains only non-"file_" prefixed keys.
+        k8s_api.create_secret(
+            name=name,
+            data=string_data_payload, # Original function expects all data here
+            namespace=namespace
+        )
 
 def _handle_create_parameter(name, fields, namespace):
     script_content_value = fields.get(FIELD_SCRIPT) 

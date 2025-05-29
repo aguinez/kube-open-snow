@@ -10,6 +10,7 @@ from kubeSol.constants import ( # Updated import
 import json
 import re
 import traceback
+import base64
 
 try:
     config.load_kube_config()
@@ -22,29 +23,17 @@ except Exception as e:
     print(f"🚨 Critical Error: An unexpected error occurred while loading Kubernetes configuration: {e}")
     core_v1_api = None
 
-def get_api_client() -> client.CoreV1Api: 
-    """
-    Retrieves the initialized Kubernetes CoreV1Api client.
-    """
-    global core_v1_api 
+def get_api_client() -> client.CoreV1Api:
+    global core_v1_api
     if core_v1_api is None:
         try:
-            print("DEBUG K8S_API: core_v1_api not found, attempting to load kube_config again...")
             config.load_kube_config()
             core_v1_api = client.CoreV1Api()
-            print("DEBUG K8S_API: core_v1_api loaded successfully.")
-        except Exception as e_conf: 
-            print(f"🔥🔥🔥 CRITICAL ERROR in get_api_client while loading config: {e_conf}") 
-            raise RuntimeError(f"Could not initialize Kubernetes API client in get_api_client: {e_conf}")
-    
-    if core_v1_api is None: 
-         raise RuntimeError("core_v1_api is None even after the attempt of re-initialization.")
+        except Exception as e_conf:
+            raise RuntimeError(f"Could not initialize Kubernetes API client: {e_conf}")
     return core_v1_api
 
 def _print_api_exception_details(e: ApiException, context_message: str):
-    """
-    Prints detailed information from an ApiException.
-    """
     base_error_message = f"❌ {context_message}: {e.reason} (Status: {e.status})"
     print(base_error_message)
     if e.body:
@@ -56,7 +45,7 @@ def _print_api_exception_details(e: ApiException, context_message: str):
                 for cause in error_body_json['details']['causes']:
                     print(f"    - Field: {cause.get('field', 'N/A')}, Reason: {cause.get('reason', 'N/A')}, Message: {cause.get('message', 'N/A')}")
         except json.JSONDecodeError:
-            print(f"  K8S API Error Body (not valid JSON or empty): {e.body[:500]}...") 
+            print(f"  K8S API Error Body (not valid JSON or empty): {e.body[:500]}...")
     else:
         print("  K8S API Error Body: No additional content from API.")
 
@@ -81,20 +70,52 @@ def _sanitize_for_k8s_name(input_name: str) -> str:
     return processed_name
 
 # --- SECRETS ---
-def create_secret(name: str, data: dict, namespace: str = DEFAULT_NAMESPACE): 
+def create_secret(name: str, data: dict, namespace: str = DEFAULT_NAMESPACE):
+    """
+    Original function to create a Kubernetes Secret with string data.
+    'data' is a dictionary where all values are plain strings.
+    """
     api = get_api_client()
     metadata = client.V1ObjectMeta(name=name, namespace=namespace)
     secret_body = client.V1Secret(
         api_version="v1",
         kind="Secret",
         metadata=metadata,
-        string_data=data 
+        string_data=data  # Assumes 'data' is purely for stringData
+    )
+    try:
+        api.create_namespaced_secret(namespace=namespace, body=secret_body)
+        print(f"✅ Secret '{name}' (string data only) created successfully in namespace '{namespace}'.")
+    except ApiException as e:
+        _print_api_exception_details(e, f"Error creating Secret '{name}' in namespace '{namespace}'")
+
+def create_secret_with_mixed_data(name: str, 
+                                  string_data_payload: dict | None, 
+                                  b64_data_payload: dict | None, 
+                                  namespace: str = DEFAULT_NAMESPACE):
+    """
+    Creates a Kubernetes Secret, supporting both plain string data and base64 encoded data (e.g., from files).
+    """
+    api = get_api_client()
+    metadata = client.V1ObjectMeta(name=name, namespace=namespace)
+    
+    secret_body = client.V1Secret(
+        api_version="v1",
+        kind="Secret",
+        metadata=metadata,
+        string_data=string_data_payload if string_data_payload else None,
+        data=b64_data_payload if b64_data_payload else None # For base64 encoded content
     )
     try:
         api.create_namespaced_secret(namespace=namespace, body=secret_body)
         print(f"✅ Secret '{name}' created successfully in namespace '{namespace}'.")
+        if string_data_payload:
+            print(f"   Includes string data keys: {list(string_data_payload.keys())}")
+        if b64_data_payload:
+            print(f"   Includes file-based/encoded data keys: {list(b64_data_payload.keys())}")
     except ApiException as e:
-        _print_api_exception_details(e, f"Error creating Secret '{name}' in namespace '{namespace}'")
+        _print_api_exception_details(e, f"Error creating Secret '{name}' with mixed data in namespace '{namespace}'")
+
 
 def delete_secret(name: str, namespace: str = DEFAULT_NAMESPACE): 
     api = get_api_client()
@@ -106,6 +127,7 @@ def delete_secret(name: str, namespace: str = DEFAULT_NAMESPACE):
             print(f"🤷 Secret '{name}' not found in namespace '{namespace}'.")
         else:
             _print_api_exception_details(e, f"Error deleting Secret '{name}' in namespace '{namespace}'")
+
 
 def update_secret(name: str, data: dict, namespace: str = DEFAULT_NAMESPACE): 
     api = get_api_client()

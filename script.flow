@@ -1,3 +1,8 @@
 CREATE SCRIPT script-de-archivo TYPE PYTHON WITH CODE_FROM_FILE="./scripts/script_local.py", PARAMS_SPEC="mensaje:string", DESCRIPTION="Este script fue cargado desde un archivo local.";
-
 EXECUTE SCRIPT script-de-archivo WITH ARGS (mensaje="Hola Mundo Archivo");
+
+CREATE SECRET gcs-service-account-key WITH file_key="./aguinez-assets-9c9373a1f66b.json";
+
+CREATE SECRET my-app-secrets-multiline WITH api_key="s3cr3tValue",
+    file_config.json="./aguinez-assets-9c9373a1f66b.json",
+    file_ca.crt="./aguinez-assets-9c9373a1f66b.json";

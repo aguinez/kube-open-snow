@@ -1,6 +1,6 @@
 # kubecli/parser/parser.py
 from lark import Lark
-from kubecli.parser.transformer import KubeTransformer # Transformer class should also be in English
+from kubeSol.parser.transformer import KubeTransformer # Transformer class should also be in English
 
 # The grammar defines the SQL-like language for KubeCLI
 sql_grammar = r"""
