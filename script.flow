@@ -4,5 +4,18 @@ EXECUTE SCRIPT script-de-archivo WITH ARGS (mensaje="Hola Mundo Archivo");
 CREATE SECRET gcs-service-account-key WITH file_key="./aguinez-assets-9c9373a1f66b.json";
 
 CREATE SECRET my-app-secrets-multiline WITH api_key="s3cr3tValue",
-    file_config.json="./aguinez-assets-9c9373a1f66b.json",
-    file_ca.crt="./aguinez-assets-9c9373a1f66b.json";
+    file_config-json="./aguinez-assets-9c9373a1f66b.json",
+    file_ca-crt="./aguinez-assets-9c9373a1f66b.json";
+
+
+CREATE SCRIPT write-parquet-to-gcs TYPE PYTHON ENGINE K8S_JOB WITH
+    CODE_FROM_FILE="scripts/write_gcs/script.py",
+    DESCRIPTION="Writes a Parquet file to GCS using PyArrow and gcsfs";
+
+
+EXECUTE SCRIPT write-parquet-to-gcs
+    WITH ARGS (
+        gcs_key_file_path_arg="/pod/secrets/gcp/service_account.json", 
+        gcs_bucket_name_arg="data-for-training"
+    )
+    WITH SECRET gcs-service-account-key KEY "key" AS "/pod/secrets/gcp/service_account.json";

@@ -11,6 +11,7 @@ import json
 import re
 import traceback
 import base64
+import os
 
 try:
     config.load_kube_config()
@@ -334,56 +335,107 @@ def update_script_configmap(script_name: str, updates: dict, namespace: str = DE
 # --- KUBERNETES JOBS ---
 def create_k8s_job(job_name: str, namespace: str, image: str,
                   script_configmap_name: str, 
-                  script_file_key_in_cm: str, 
-                  script_mount_path: str,     
+                  script_file_key_in_cm: str, # e.g., "code"
+                  script_mount_path: str,     # e.g., "/kubesol_scripts"
                   container_command: list[str] | None = None, 
                   container_args: list[str] | None = None,    
                   env_vars: list[client.V1EnvVar] | None = None, 
-                  restart_policy: str = "Never"
+                  restart_policy: str = "Never",
+                  secret_volume_mount_configs: list[dict] | None = None # NEW parameter
                   ) -> bool:
-    """
-    Creates a Kubernetes Job to execute a script.
-    """
+    """Creates a Kubernetes Job to execute a script, with support for secret mounts."""
     core_api = get_api_client() 
     batch_v1_api = client.BatchV1Api(core_api.api_client) 
 
-    volume_name = "script-volume" 
-    configmap_volume = client.V1Volume(
-        name=volume_name,
+    # --- Define Volumes & Volume Mounts ---
+    all_volumes = []
+    all_container_volume_mounts = []
+
+    # 1. For the script ConfigMap
+    script_volume_name = f"script-vol-{_sanitize_for_k8s_name(script_configmap_name)}"[:63] # Ensure valid name
+    # Mount the entire ConfigMap to the script_mount_path directory.
+    # The script will be available as a file named after its key (script_file_key_in_cm) within this directory.
+    script_volume_obj = client.V1Volume( # Renamed var
+        name=script_volume_name,
         config_map=client.V1ConfigMapVolumeSource(
             name=script_configmap_name 
+            # To mount only specific keys as files with those key names:
+            # items=[client.V1KeyToPath(key=script_file_key_in_cm, path=script_file_key_in_cm)]
+            # If script_mount_path is a dir, and script is script_mount_path/script_file_key_in_cm,
+            # then mounting the whole CM to script_mount_path is fine.
         )
     )
+    all_volumes.append(script_volume_obj)
 
-    volume_mount = client.V1VolumeMount(
-        name=volume_name, 
-        mount_path=script_mount_path, 
+    script_volume_mount_obj = client.V1VolumeMount( # Renamed var
+        name=script_volume_name,
+        mount_path=script_mount_path, # e.g., "/kubesol_scripts"
     )
+    all_container_volume_mounts.append(script_volume_mount_obj)
     
-    container_spec = client.V1Container( # Renamed
-        name=f"{job_name}-container", 
+    # 2. For additional Secret Mounts (NEW logic)
+    if secret_volume_mount_configs:
+        for i, mount_config in enumerate(secret_volume_mount_configs):
+            user_secret_name = mount_config["secret_name"]
+            key_from_secret = mount_config["key_in_secret"]
+            target_path_in_pod = mount_config["mount_path_in_pod"] # This is the full path to the target file
+
+            # Derive volume name, mount directory, and filename for subPath
+            # Example: target_path_in_pod = "/mnt/secrets/gcp/key.json"
+            #   volume_mount_dir = "/mnt/secrets/gcp"
+            #   filename_in_mount_dir = "key.json"
+            volume_mount_dir = os.path.dirname(target_path_in_pod)
+            filename_in_mount_dir = os.path.basename(target_path_in_pod)
+
+            # Create a unique volume name for this secret mount
+            # Sanitize user_secret_name for use in volume_name
+            sanitized_secret_name_part = _sanitize_for_k8s_name(user_secret_name)
+            secret_volume_name = f"secret-{sanitized_secret_name_part}-{i}"[:63] # Ensure valid and unique enough
+
+            secret_volume_obj = client.V1Volume( # Renamed var
+                name=secret_volume_name,
+                secret=client.V1SecretVolumeSource(
+                    secret_name=user_secret_name,
+                    items=[client.V1KeyToPath(key=key_from_secret, path=filename_in_mount_dir)]
+                    # This projects the specific 'key_from_secret' to a file named 'filename_in_mount_dir'
+                    # within the directory specified by the volumeMount's mountPath.
+                )
+            )
+            all_volumes.append(secret_volume_obj)
+
+            container_secret_mount = client.V1VolumeMount( # Renamed var
+                name=secret_volume_name, # Must match the V1Volume name
+                mount_path=volume_mount_dir, # Mount the directory containing the projected file
+                read_only=True # Secrets are typically mounted read-only
+            )
+            all_container_volume_mounts.append(container_secret_mount)
+
+    # Define the Container
+    container_spec = client.V1Container(
+        name=f"{job_name}-container",
         image=image,
-        command=container_command, 
+        command=container_command,
         args=container_args,
-        env=env_vars,
-        volume_mounts=[volume_mount] 
+        env=env_vars if env_vars else [], 
+        volume_mounts=all_container_volume_mounts 
     )
 
+    # Define Pod Template Spec
     pod_template_spec = client.V1PodTemplateSpec(
-        metadata=client.V1ObjectMeta(labels={"app": job_name, "kubesol-job": "true"}), # Changed label
+        metadata=client.V1ObjectMeta(labels={"app": job_name, "kubesol-job": "true"}),
         spec=client.V1PodSpec(
-            restart_policy=restart_policy, 
-            containers=[container_spec],        
-            volumes=[configmap_volume]     
+            restart_policy=restart_policy,
+            containers=[container_spec],
+            volumes=all_volumes 
         )
     )
 
     job_spec = client.V1JobSpec(
-        template=pod_template_spec, 
-        backoff_limit=4             
+        template=pod_template_spec,
+        backoff_limit=4 
     )
 
-    job_object = client.V1Job( 
+    job_object = client.V1Job(
         api_version="batch/v1",
         kind="Job",
         metadata=client.V1ObjectMeta(name=job_name, namespace=namespace),
@@ -393,6 +445,8 @@ def create_k8s_job(job_name: str, namespace: str, image: str,
     try:
         batch_v1_api.create_namespaced_job(body=job_object, namespace=namespace)
         print(f"✅ Job '{job_name}' created in namespace '{namespace}'.")
+        if secret_volume_mount_configs:
+            print(f"   Job includes {len(secret_volume_mount_configs)} mounted secret(s).")
         return True
     except ApiException as e:
         _print_api_exception_details(e, f"Error creating Job '{job_name}'")

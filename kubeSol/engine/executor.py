@@ -1,16 +1,16 @@
 # kubeSol/engine/executor.py
-from kubeSol.parser.parser import parse_sql # Updated import
-from kubeSol.engine import k8s_api # Updated import
-from kubeSol.engine import script_runner # Updated import
-import base64
+from kubeSol.parser.parser import parse_sql
+from kubeSol.engine import k8s_api
+from kubeSol.engine import script_runner
 import os
-from kubeSol.constants import ( # Updated import
+import base64 
+from kubeSol.constants import (
     ACTION_CREATE, ACTION_DELETE, ACTION_UPDATE, ACTION_GET, ACTION_LIST, ACTION_EXECUTE,
     RESOURCE_SECRET, RESOURCE_CONFIGMAP, RESOURCE_PARAMETER, RESOURCE_SCRIPT,
     FIELD_SCRIPT, DEFAULT_NAMESPACE,
     SCRIPT_CM_KEY_CODE, SCRIPT_CM_KEY_TYPE, SCRIPT_CM_KEY_ENGINE, 
     SCRIPT_CM_KEY_PARAMS_SPEC, SCRIPT_CM_KEY_DESCRIPTION, SCRIPT_CM_KEY_CODE_FROM_FILE,
-    SCRIPT_ENGINE_K8S_JOB 
+    SCRIPT_ENGINE_K8S_JOB, SCRIPT_ENGINE_SPARK_OPERATOR # Added SPARK_OPERATOR for completeness
 )
 from kubernetes.client.exceptions import ApiException as K8sApiException 
 
@@ -20,11 +20,10 @@ def _handle_create_secret(name: str, fields: dict, namespace: str):
     """
     Handles the CREATE SECRET command.
     Distinguishes between plain string data and data from local files (prefixed with 'file_').
-    Calls the appropriate k8s_api function.
     """
     string_data_payload = {}
     b64_data_payload = {} 
-    has_file_fields = False
+    has_file_fields = False # Flag to determine if any file_ fields were processed
 
     for key, value in fields.items():
         if key.startswith("file_"):
@@ -47,22 +46,26 @@ def _handle_create_secret(name: str, fields: dict, namespace: str):
         else:
             string_data_payload[key] = value
     
-    if has_file_fields or not string_data_payload: # If there are file fields, or if it's only file_fields (string_data_payload empty)
-                                                # or if both are present.
+    # If file fields were processed, or if string_data is empty (meaning only file fields or no fields)
+    # use the function that supports mixed data. Otherwise, use the simpler original create_secret.
+    if has_file_fields or not string_data_payload and b64_data_payload : 
         k8s_api.create_secret_with_mixed_data(
             name=name,
             string_data_payload=string_data_payload if string_data_payload else None,
-            b64_data_payload=b64_data_payload if b64_data_payload else None, # Will be populated if file_ fields existed
+            b64_data_payload=b64_data_payload if b64_data_payload else None, 
             namespace=namespace
         )
-    else:
-        # Only string data fields were provided, use the original create_secret
-        # This path is taken if fields contains only non-"file_" prefixed keys.
-        k8s_api.create_secret(
+    elif string_data_payload: # Only string data fields were provided
+        k8s_api.create_secret( # Call original function for stringData only
             name=name,
-            data=string_data_payload, # Original function expects all data here
+            data=string_data_payload, 
             namespace=namespace
         )
+    else: # No fields provided at all (empty WITH clause)
+        # Decide behavior: error, or create empty secret? For now, let k8s_api handle if it allows empty.
+        # Calling create_secret_with_mixed_data with both None will likely create an empty data/stringData secret.
+        k8s_api.create_secret_with_mixed_data(name=name, string_data_payload=None, b64_data_payload=None, namespace=namespace)
+
 
 def _handle_create_parameter(name, fields, namespace):
     script_content_value = fields.get(FIELD_SCRIPT) 
@@ -83,7 +86,12 @@ def _handle_delete_configmap(name, resource_type, namespace):
     k8s_api.delete_configmap(name=name, namespace=namespace)
 
 def _handle_update_secret(name, fields, namespace):
+    # Note: If update_secret needs to support file-based updates,
+    # it would require similar logic to _handle_create_secret and
+    # a corresponding k8s_api.update_secret_with_mixed_data function.
+    # For now, assuming it updates with string data only.
     k8s_api.update_secret(name=name, data=fields, namespace=namespace)
+
 
 def _handle_update_parameter(name, fields, namespace):
     script_content_value = fields.get(FIELD_SCRIPT) 
@@ -122,11 +130,12 @@ def _handle_create_script(name: str, details: dict, namespace: str):
 
     if final_script_details_for_cm.get(SCRIPT_CM_KEY_CODE) is None: 
          raise ValueError(f"Internal Error: Script code is missing for script '{name}' after processing CODE/CODE_FROM_FILE.")
-    if not final_script_details_for_cm.get(SCRIPT_CM_KEY_TYPE):
+    if not final_script_details_for_cm.get(SCRIPT_CM_KEY_TYPE): # Using direct import
         raise ValueError(f"Field '{SCRIPT_CM_KEY_TYPE}' (script type) is required for creating script '{name}'.")
     
+    # Use direct imports for SCRIPT_CM_KEY_ENGINE and SCRIPT_ENGINE_K8S_JOB
     if not final_script_details_for_cm.get(SCRIPT_CM_KEY_ENGINE): 
-        final_script_details_for_cm[SCRIPT_CM_KEY_ENGINE] = SCRIPT_ENGINE_K8S_JOB
+        final_script_details_for_cm[SCRIPT_CM_KEY_ENGINE] = SCRIPT_ENGINE_K8S_JOB 
         print(f"ℹ️ Engine not specified for script '{name}', defaulting to '{SCRIPT_ENGINE_K8S_JOB}'.")
 
     print(f"[DEBUG EXECUTOR] Calling k8s_api.create_script_configmap for script: '{name}' in ns '{namespace}'. Details: {list(final_script_details_for_cm.keys())}")
@@ -141,7 +150,7 @@ def _handle_get_script(name: str, namespace: str):
         cm_display_name = script_data_map.get('_cm_name', k8s_api.get_script_cm_name(name))
         print(f"📄 Script '{name}' details (from ConfigMap '{cm_display_name}'):")
         for key, value in script_data_map.items():
-            if key == SCRIPT_CM_KEY_CODE:
+            if key == SCRIPT_CM_KEY_CODE: # Using direct import
                 print(f"  {key}:\n---\n{value}\n---")
             elif key.startswith('_'): 
                 continue
@@ -157,6 +166,7 @@ def _handle_list_scripts(namespace: str):
     print(f"📜 Scripts in namespace '{namespace}':")
     for script_data_item in scripts_list: 
         display_name = script_data_item.get('_script_name_from_cm', 'N/A') 
+        # Using direct imports for constants
         script_type = script_data_item.get(SCRIPT_CM_KEY_TYPE, 'N/A') 
         script_engine = script_data_item.get(SCRIPT_CM_KEY_ENGINE, 'N/A') 
         description = script_data_item.get(SCRIPT_CM_KEY_DESCRIPTION, '') 
@@ -198,46 +208,55 @@ def _resolve_parameters_from_configmap(cm_name_for_params: str, key_prefix: str,
 
 
 def _handle_execute_script(
-    script_name_to_exec: str, 
-    custom_args_map: dict | None, 
-    args_from_cm_details: dict | None, 
+    script_name_to_exec: str,
+    parsed_instruction_details: dict, 
     namespace: str
 ):
-    """Handles executing a SCRIPT resource."""
     print(f"🚀 Attempting to execute script '{script_name_to_exec}' in namespace '{namespace}'...")
-    script_cm_data_map = k8s_api.get_script_configmap_data(script_name=script_name_to_exec, namespace=namespace) 
+    
+    custom_args_map = parsed_instruction_details.get("custom_args")
+    args_from_cm_details = parsed_instruction_details.get("args_from_configmap")
+    secret_mounts_list = parsed_instruction_details.get("secret_mounts", []) 
+
+    script_cm_data_map = k8s_api.get_script_configmap_data(script_name=script_name_to_exec, namespace=namespace)
     if not script_cm_data_map:
-        print(f"❌ Cannot execute script '{script_name_to_exec}': ConfigMap data not found.")
+        print(f"❌ Cannot execute script '{script_name_to_exec}': Script ConfigMap data not found.")
         return
 
-    final_resolved_parameters = {} 
+    final_resolved_parameters = {}
     if args_from_cm_details:
         cm_name = args_from_cm_details.get("cm_name")
-        key_prefix_str = args_from_cm_details.get("key_prefix", "") 
+        key_prefix_str = args_from_cm_details.get("key_prefix", "")
         if cm_name:
-            print(f"ℹ️ Script '{script_name_to_exec}' will load parameters from ConfigMap '{cm_name}' (prefix: '{key_prefix_str}').")
-            cm_loaded_params = _resolve_parameters_from_configmap(cm_name, key_prefix_str, namespace) 
+            cm_loaded_params = _resolve_parameters_from_configmap(cm_name, key_prefix_str, namespace)
             final_resolved_parameters.update(cm_loaded_params)
-        else:
-            print(f"⚠️ Script '{script_name_to_exec}': 'PARAMS_FROM_CONFIGMAP' clause provided, but ConfigMap name is missing.")
-
+    
     if custom_args_map:
-        print(f"ℹ️ Script '{script_name_to_exec}' will use custom arguments: {list(custom_args_map.keys())}")
-        final_resolved_parameters.update(custom_args_map) 
+        final_resolved_parameters.update(custom_args_map)
 
+    # CORRECTED: Use direct constant names due to 'from ... import ...' style
     script_engine_type = script_cm_data_map.get(SCRIPT_CM_KEY_ENGINE, SCRIPT_ENGINE_K8S_JOB) 
-    print(f"ℹ️ Script '{script_name_to_exec}' using engine: '{script_engine_type}'. Resolved parameters: {list(final_resolved_parameters.keys())}")
+    
+    print(f"ℹ️ Script '{script_name_to_exec}' using engine: '{script_engine_type}'.")
+    if final_resolved_parameters:
+        print(f"   With resolved parameters: {list(final_resolved_parameters.keys())}")
+    if secret_mounts_list:
+        print(f"   With {len(secret_mounts_list)} secret mount(s) requested.")
 
+    # CORRECTED: Use direct constant name
     if script_engine_type == SCRIPT_ENGINE_K8S_JOB:
         script_runner.run_script_as_k8s_job(
             cli_script_name=script_name_to_exec,
             script_cm_data=script_cm_data_map,
             resolved_parameters=final_resolved_parameters,
-            namespace=namespace
+            namespace=namespace,
+            secret_mounts=secret_mounts_list 
         )
+    elif script_engine_type == SCRIPT_ENGINE_SPARK_OPERATOR: # Example for future
+        print(f"ℹ️ Engine '{SCRIPT_ENGINE_SPARK_OPERATOR}' selected, but runner not yet implemented.")
+        # script_runner.run_script_with_spark_operator(...) 
     else:
         print(f"❌ Execution engine '{script_engine_type}' is not supported for script '{script_name_to_exec}'.")
-
 
 # --- Command Dispatcher ---
 COMMAND_HANDLERS = {
@@ -251,7 +270,7 @@ COMMAND_HANDLERS = {
     (ACTION_DELETE, RESOURCE_CONFIGMAP): _handle_delete_configmap,
     (ACTION_DELETE, RESOURCE_SCRIPT): _handle_delete_script,
 
-    (ACTION_UPDATE, RESOURCE_SECRET): _handle_update_secret,
+    (ACTION_UPDATE, RESOURCE_SECRET): _handle_update_secret, 
     (ACTION_UPDATE, RESOURCE_PARAMETER): _handle_update_parameter,
     (ACTION_UPDATE, RESOURCE_CONFIGMAP): _handle_update_configmap,
     (ACTION_UPDATE, RESOURCE_SCRIPT): _handle_update_script,
@@ -270,6 +289,9 @@ def execute_command(command_string: str, namespace: str = DEFAULT_NAMESPACE):
         print(f"🧾 Parsed: {parsed_instruction}")
     except Exception as e: 
         print(f"❌ Error parsing command: {e}")
+        # For more detailed parsing errors during development:
+        # import traceback
+        # traceback.print_exc()
         return
 
     action_type = parsed_instruction.get("action") 
@@ -282,23 +304,30 @@ def execute_command(command_string: str, namespace: str = DEFAULT_NAMESPACE):
     if not target_handler_func:
         print(f"❌ Command not supported: Action '{action_type}' for resource type '{resource_category}'.")
         return
-
+    
     try:
-        if action_type == ACTION_CREATE:
+        if action_type == ACTION_EXECUTE:
+            if resource_category == RESOURCE_SCRIPT:
+                target_handler_func(
+                    script_name_to_exec=resource_identifier,
+                    parsed_instruction_details=parsed_instruction, 
+                    namespace=namespace
+                )
+            else:
+                print(f"❌ EXECUTE command is only supported for SCRIPT resources, not '{resource_category}'.")
+        elif action_type == ACTION_CREATE:
             details_map = parsed_instruction.get("details") 
             fields_map = parsed_instruction.get("fields")   
-            
             if resource_category == RESOURCE_SCRIPT:
-                if details_map is None:
+                if details_map is None: 
                     print(f"❌ Error: 'details' (WITH clause content) are required for CREATE SCRIPT.")
                     return
                 target_handler_func(name=resource_identifier, details=details_map, namespace=namespace)
             else: 
-                if fields_map is None:
+                if fields_map is None: 
                      print(f"❌ Error: Fields (WITH clause) are required for {action_type} {resource_category}.")
                      return
                 target_handler_func(name=resource_identifier, fields=fields_map, namespace=namespace)
-
         elif action_type == ACTION_UPDATE:
             if resource_category == RESOURCE_SCRIPT:
                 updates_data = parsed_instruction.get("updates") 
@@ -312,15 +341,6 @@ def execute_command(command_string: str, namespace: str = DEFAULT_NAMESPACE):
                     print(f"❌ Error: Fields (WITH clause) are required for {action_type} {resource_category}.")
                     return
                 target_handler_func(name=resource_identifier, fields=fields_data, namespace=namespace)
-
-        elif action_type == ACTION_EXECUTE: 
-            if resource_category == RESOURCE_SCRIPT:
-                custom_arguments = parsed_instruction.get("custom_args") 
-                args_from_cm_config = parsed_instruction.get("args_from_configmap") 
-                target_handler_func(script_name_to_exec=resource_identifier, custom_args_map=custom_arguments, args_from_cm_details=args_from_cm_config, namespace=namespace)
-            else:
-                print(f"❌ EXECUTE command is only supported for SCRIPT resources, not '{resource_category}'.")
-        
         elif action_type == ACTION_GET or action_type == ACTION_DELETE:
             if resource_identifier is None: 
                 print(f"❌ Error: Resource name is required for {action_type} {resource_category}.")
@@ -328,11 +348,9 @@ def execute_command(command_string: str, namespace: str = DEFAULT_NAMESPACE):
             if action_type == ACTION_DELETE and resource_category in [RESOURCE_SECRET, RESOURCE_CONFIGMAP, RESOURCE_PARAMETER]: 
                  target_handler_func(name=resource_identifier, resource_type=resource_category, namespace=namespace)
             else: 
-                 target_handler_func(name=resource_identifier, namespace=namespace) 
-        
-        elif action_type == ACTION_LIST: 
+                 target_handler_func(name=resource_identifier, namespace=namespace)
+        elif action_type == ACTION_LIST:
             target_handler_func(namespace=namespace)
-
         else:
             print(f"❌ Internal Error: Unhandled action structure for {action_type} {resource_category}")
 
@@ -342,3 +360,5 @@ def execute_command(command_string: str, namespace: str = DEFAULT_NAMESPACE):
         k8s_api._print_api_exception_details(kube_api_error, f"Kubernetes API error during '{action_type} {resource_category}' operation for '{resource_identifier or ''}'")
     except Exception as e:
         print(f"❌ Unexpected error executing command for '{resource_identifier if resource_identifier else resource_category}': {type(e).__name__} - {e}")
+        import traceback
+        traceback.print_exc()

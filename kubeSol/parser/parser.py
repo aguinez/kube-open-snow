@@ -1,8 +1,11 @@
-# kubecli/parser/parser.py
+# kubeSol/parser/parser.py
 from lark import Lark
-from kubeSol.parser.transformer import KubeTransformer # Transformer class should also be in English
+# Ensure KubeTransformer is imported from the correct path if it's in a different file
+# from .transformer import KubeTransformer 
+# Assuming KubeTransformer is defined in kubeSol.parser.transformer
+from kubeSol.parser.transformer import KubeTransformer
 
-# The grammar defines the SQL-like language for KubeCLI
+# The grammar defines the SQL-like language for KubeSol
 sql_grammar = r"""
     ?start: command [";"] // A command can optionally end with a semicolon
 
@@ -74,44 +77,41 @@ sql_grammar = r"""
                        | "ENGINE"i "=" script_engine_value -> update_script_engine_field 
 
     // --- EXECUTE SCRIPT Command ---
-    execute_script_command: "EXECUTE" SCRIPT_KW script_name [with_args_clause] [with_params_cm_clause] -> execute_script
-    
-    // Optional clause for providing inline arguments
+    // Clause for providing inline arguments
     with_args_clause: "WITH" "ARGS" "(" custom_params ")"
     custom_params: custom_param ("," custom_param)*
     custom_param: NAME "=" ESCAPED_STRING // Custom parameter format
 
-    // Optional clause for loading arguments from a ConfigMap
+    // Clause for loading arguments from a ConfigMap
     with_params_cm_clause: "WITH" "PARAMS_FROM_CONFIGMAP" configmap_name ["KEY_PREFIX" prefix_string]
     configmap_name: NAME          // Name of the ConfigMap containing parameters
     prefix_string: ESCAPED_STRING // Optional prefix for keys in the ConfigMap
 
-    // General name rule: starts with a letter/number, can contain hyphens or underscores, ends with letter/number.
-    // K8s sanitization will be applied later for actual resource names.
+    // Clause for mounting secrets
+    quoted_string_value: ESCAPED_STRING // Used for KEY and AS path for flexibility
+    secret_mount_clause: "WITH" "SECRET" NAME "KEY" quoted_string_value "AS" quoted_string_value -> map_secret_mount
+
+    // Main rule for execute script, defining order of optional clauses
+    execute_script_command: "EXECUTE" SCRIPT_KW script_name \
+                            [with_args_clause] \
+                            [with_params_cm_clause] \
+                            (secret_mount_clause)* \
+                            -> execute_script
+
+    // General name rule & common imports
+    // NAME allows for typical Kubernetes naming conventions (dns-1123 label subset), plus underscores internally.
     NAME: /[a-z0-9]([-a-z0-9_]*[a-z0-9])?/ 
 
     %import common.ESCAPED_STRING // Lark common terminal for quoted strings
-    %import common.WS             // Lark common terminal for whitespace
-    %ignore WS                    // Ignore whitespace between tokens
+    %import common.WS             // Lark common terminal for whitespace (includes space, tab, newline, etc.)
+    %ignore WS                    // Ignore whitespace between tokens globally
 """
 
 # Initialize the Lark parser with the defined grammar and transformer.
-# The transformer (KubeTransformer) converts the parse tree into a more usable Python structure (typically dictionaries).
-# `maybe_placeholders=True` allows optional grammar rules ([...]) to correctly pass None to the transformer if not present.
-kube_cli_parser = Lark(sql_grammar, parser="lalr", transformer=KubeTransformer(), maybe_placeholders=True) # Renamed
+kube_sol_parser = Lark(sql_grammar, parser="lalr", transformer=KubeTransformer(), maybe_placeholders=True) 
 
-def parse_sql(input_sql_command: str): # Renamed
+def parse_sql(input_sql_command: str): 
     """
-    Parses the KubeCLI SQL-like command string.
-
-    Args:
-        input_sql_command: The command string to parse.
-
-    Returns:
-        A dictionary representing the parsed command structure, 
-        as transformed by KubeTransformer.
-    
-    Raises:
-        Lark errors (e.g., UnexpectedToken, VisitError) if parsing or transformation fails.
+    Parses the KubeSol SQL-like command string.
     """
-    return kube_cli_parser.parse(input_sql_command)
+    return kube_sol_parser.parse(input_sql_command)

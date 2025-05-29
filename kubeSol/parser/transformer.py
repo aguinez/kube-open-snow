@@ -1,14 +1,22 @@
 # kubeSol/parser/transformer.py
 from lark import Transformer, v_args, Token
 from kubeSol import constants # Updated import
+import ast
 
 class KubeTransformer(Transformer): # Class name kept as KubeTransformer as it's tied to Lark's convention
     # --- Terminal Transformers ---
     def NAME(self, token: Token):
-        return str(token.value)
+        return str(token.value) # Should return a string like "gcs-service-account-key"
 
     def ESCAPED_STRING(self, token: Token):
-        return token.value[1:-1]
+        # token.value includes the surrounding quotes, e.g., "\"content\""
+        try:
+            # ast.literal_eval correctly unescapes \n, \t, etc. and returns the string content
+            return ast.literal_eval(token.value) 
+        except (ValueError, SyntaxError):
+            # Fallback for basic unquoting if ast.literal_eval fails
+            # This path should ideally not be hit for well-formed escaped strings
+            return token.value[1:-1] 
 
     # --- Basic Field/Fields Transformers ---
     @v_args(inline=True)
@@ -199,28 +207,77 @@ class KubeTransformer(Transformer): # Class name kept as KubeTransformer as it's
 
     def execute_script(self, items: list):
         print(f"[DEBUG TRANSFORMER] execute_script received items: {items}")
+        script_resource_type = items[0]
+        script_identifier = items[1]
 
-        script_resource_type = items[0] 
-        script_identifier = items[1]    
-
-        instruction_dict = { 
-            "action": constants.ACTION_EXECUTE,
+        instruction = {
+            "action": constants.ACTION_EXECUTE, # Assuming constants are imported directly (e.g., from .. import constants) or you use constants.ACTION_EXECUTE
             "type": script_resource_type,
             "name": script_identifier,
             "custom_args": None,
-            "args_from_configmap": None
+            "args_from_configmap": None,
+            "secret_mounts": [] 
         }
+
+        current_item_index = 2
+        if current_item_index < len(items) and items[current_item_index] and isinstance(items[current_item_index], dict) and "custom_args" in items[current_item_index]:
+            instruction["custom_args"] = items[current_item_index]["custom_args"]
+            current_item_index += 1
         
-        for i in range(2, len(items)):
-            clause_data = items[i]
-            if clause_data is not None: 
-                if "custom_args" in clause_data:
-                    instruction_dict["custom_args"] = clause_data["custom_args"]
-                elif "args_from_configmap" in clause_data:
-                    instruction_dict["args_from_configmap"] = clause_data["args_from_configmap"]
+        if current_item_index < len(items) and items[current_item_index] and isinstance(items[current_item_index], dict) and "args_from_configmap" in items[current_item_index]:
+            instruction["args_from_configmap"] = items[current_item_index]["args_from_configmap"]
+            current_item_index += 1
         
-        print(f"[DEBUG TRANSFORMER] execute_script returning: {instruction_dict}")
-        return instruction_dict
+        for i in range(current_item_index, len(items)):
+            if items[i] and isinstance(items[i], dict) and items[i].get("type") == "secret_mount_spec":
+                # Ensure the dictionary from map_secret_mount is correctly formed with strings
+                mount_spec = items[i]
+                if not isinstance(mount_spec.get("mount_path_in_pod"), str):
+                    print(f"[DEBUG TRANSFORMER] CRITICAL ERROR in execute_script: 'mount_path_in_pod' is not a string in {mount_spec}")
+                    # This indicates the problem is likely in map_secret_mount or its inputs
+                instruction["secret_mounts"].append(mount_spec)
+        
+        print(f"[DEBUG TRANSFORMER] execute_script returning: {instruction}")
+        return instruction
+
+    def quoted_string_value(self, items: list):
+        # 'items' is a list containing the single transformed child (the result of ESCAPED_STRING).
+        # This result should already be a string.
+        if items and isinstance(items[0], str):
+            return items[0]
+        # Fallback or error if it's not a string, indicating an upstream issue
+        print(f"[DEBUG TRANSFORMER] ERROR: quoted_string_value did not receive a string from ESCAPED_STRING. Got: {items}")
+        # Attempt to convert, but this might indicate a deeper problem
+        return str(items[0]) if items else None 
+
+    @v_args(inline=True)
+    def map_secret_mount(self, secret_name_str, key_in_secret_str, mount_path_in_pod_str):
+        # Due to @v_args(inline=True), these arguments should be the results of their respective transformers:
+        # secret_name_str: from NAME (should be string)
+        # key_in_secret_str: from quoted_string_value (should be string)
+        # mount_path_in_pod_str: from quoted_string_value (should be string)
+
+        # Add explicit type checks and logging for debugging this specific error
+        if not isinstance(secret_name_str, str):
+            print(f"[DEBUG TRANSFORMER] map_secret_mount: secret_name_str is not a string! Type: {type(secret_name_str)}, Value: {secret_name_str}")
+        if not isinstance(key_in_secret_str, str):
+            print(f"[DEBUG TRANSFORMER] map_secret_mount: key_in_secret_str is not a string! Type: {type(key_in_secret_str)}, Value: {key_in_secret_str}")
+        if not isinstance(mount_path_in_pod_str, str): # This is likely the problematic one
+            print(f"[DEBUG TRANSFORMER] map_secret_mount: mount_path_in_pod_str is not a string! Type: {type(mount_path_in_pod_str)}, Value: {mount_path_in_pod_str}")
+            # If it's a Tree or Token, the os.path functions will fail.
+
+        # Construct the dictionary, ensuring values are strings.
+        # If an argument was not a string, the str() conversion here might create a
+        # non-path-like string (e.g., "Tree(token, children)"), but it would prevent the TypeError.
+        # The real fix is to ensure the arguments *arrive* as proper strings.
+        mount_spec = {
+            "type": "secret_mount_spec",
+            "secret_name": str(secret_name_str), 
+            "key_in_secret": str(key_in_secret_str),
+            "mount_path_in_pod": str(mount_path_in_pod_str) # This value is used by os.path
+        }
+        print(f"[DEBUG TRANSFORMER] map_secret_mount created spec: {mount_spec}")
+        return mount_spec
 
     # --- General command and start rules ---
     def command(self, items: list):
