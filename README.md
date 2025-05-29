@@ -54,7 +54,101 @@ It currently supports interacting with [KinD (Kubernetes in Docker)](https://kin
 
 ## Running KubeSol
 
+
+
 Execute the `main.py` script from the root of the `kubeSol` project directory:
 
 ```bash
 python -m kubeSol.main
+
+* **Create a Script with code from a local file:**
+    ```sql
+    CREATE SCRIPT script_from_file TYPE PYTHON ENGINE K8S_JOB WITH
+        CODE_FROM_FILE="/path/to/your/local_script.py",
+        DESCRIPTION="Script loaded from a local file";
+    ```
+
+* **Supported Script Types:** `PYTHON`, `PYSPARK`
+* **Supported Script Engines:** `K8S_JOB` (default if not specified)
+
+* **Get Script details:**
+    ```sql
+    GET SCRIPT my_python_script;
+    ```
+
+* **List all Scripts:**
+    ```sql
+    LIST SCRIPT;
+    ```
+
+* **Update a Script:**
+    You can update `CODE`, `PARAMS_SPEC`, `DESCRIPTION`, or `ENGINE`.
+    ```sql
+    UPDATE SCRIPT my_python_script SET
+        DESCRIPTION="An updated simple Python script",
+        CODE="print('This is the new code!')";
+    ```
+
+* **Delete a Script:**
+    ```sql
+    DELETE SCRIPT my_python_script;
+    ```
+
+### 5. Executing Scripts
+
+Scripts are executed as Kubernetes Jobs.
+
+* **Execute a Script with inline arguments:**
+    ```sql
+    EXECUTE SCRIPT my_python_script WITH ARGS (NAME="KubeSol User", ITERATIONS="3");
+    ```
+
+* **Execute a Script with arguments from a ConfigMap:**
+    First, create a ConfigMap (e.g., `script_params_cm`) with keys like `prefix_NAME="Alice"`, `prefix_ITERATIONS="2"`.
+    ```sql
+    EXECUTE SCRIPT my_python_script WITH PARAMS_FROM_CONFIGMAP script_params_cm KEY_PREFIX "prefix_";
+    ```
+
+* **Execute a Script mounting a Secret:**
+    This mounts the `secret_key` from Kubernetes Secret `my-kube-secret` to the path `/mnt/secrets/mysecret/secret_key` inside the script's pod.
+    ```sql
+    EXECUTE SCRIPT my_python_script
+        WITH ARGS (NAME="SecureUser")
+        WITH SECRET my-kube-secret KEY "secret_key" AS "/mnt/secrets/mysecret/secret_key";
+    ```
+    *(Note: Ensure the Secret `my-kube-secret` with a key `secret_key` exists in the Kubernetes namespace.)*
+
+* **Execute a Script with all clauses:**
+    ```sql
+    EXECUTE SCRIPT my_python_script
+        WITH ARGS (NAME="Galaxy", ITERATIONS="2")
+        WITH PARAMS_FROM_CONFIGMAP script_run_config KEY_PREFIX "run_"
+        WITH SECRET first_secret KEY "api_token" AS "/etc/tokens/api.token"
+        WITH SECRET second_secret KEY "config.json" AS "/app/config/settings.json";
+    ```
+
+## Project Structure
+
+* `kubeSol/main.py`: Main entry point and interactive shell.
+* `kubeSol/constants.py`: Defines application-wide constants.
+* `kubeSol/parser/`:
+    * `parser.py`: Lark grammar definition and parser initialization.
+    * `transformer.py`: Transforms parsed tokens into a structured command dictionary.
+* `kubeSol/engine/`:
+    * `executor.py`: Dispatches parsed commands to appropriate handlers.
+    * `k8s_api.py`: Handles direct interactions with the Kubernetes API using the `kubernetes` Python client.
+    * `script_runner.py`: Logic for running scripts (e.g., as Kubernetes Jobs).
+    * `kind_manager.py`: Manages listing and selecting KinD clusters.
+
+## Future Development Ideas
+
+* Support for more Kubernetes resources (Deployments, Services, etc.).
+* Enhanced `GET` and `LIST` commands with filtering and output formatting.
+* Support for other script execution engines (e.g., Spark Operator if `SCRIPT_TYPE_PYSPARK` is to be fully utilized).
+* More robust error handling and user feedback.
+* Non-interactive mode for scripting KubeSol commands.
+* Integration with other Kubernetes cluster types beyond KinD.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit pull requests or open issues for bugs, feature requests, or improvements.
