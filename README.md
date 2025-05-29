@@ -60,7 +60,7 @@ Execute the `main.py` script from the root of the `kubeSol` project directory:
 
 ```bash
 python -m kubeSol.main
-
+```
 * **Create a Script with code from a local file:**
     ```sql
     CREATE SCRIPT script_from_file TYPE PYTHON ENGINE K8S_JOB WITH
