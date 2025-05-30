@@ -2,6 +2,7 @@
 from kubeSol.engine.kind_manager import select_cluster 
 from kubeSol.engine.executor import execute_command 
 from kubeSol.constants import DEFAULT_NAMESPACE
+from kubeSol.notebook.cli import launch_notebook_server
 
 def shell():
     """
@@ -13,62 +14,93 @@ def shell():
     print("Enter commands, spanning multiple lines if needed.")
     print("End your complete command with a semicolon (;) to execute.")
     
+    # This shell will handle commands like CREATE SCRIPT, EXECUTE SCRIPT, etc.
+    # The LAUNCH NOTEBOOK command will be handled before entering this loop,
+    # or as a special case within it.
+    print("KubeSol - Write SQL-like commands for Kubernetes.")
+    print("Enter commands, spanning multiple lines if needed.")
+    print("End your complete command with a semicolon (;) to execute.")
+    print("Type 'LAUNCH NOTEBOOK' to start a Jupyter Notebook session for KubeSol.")
+    
     current_namespace = DEFAULT_NAMESPACE 
-    command_buffer = [] # Stores lines of the current multi-line command
+    command_buffer = [] 
 
     while True:
+        if not command_buffer:
+            prompt = f"{current_namespace} >> "
+        else:
+            prompt = f"{current_namespace} ... " 
+
         try:
-            # Determine the prompt based on whether we are continuing a command
-            if not command_buffer:
-                prompt = f"{current_namespace} >> "
-            else:
-                prompt = f"{current_namespace} ... " # Continuation prompt
-
             line_input = input(prompt)
+            stripped_line_input = line_input.strip()
+            lower_stripped_line_input = stripped_line_input.lower()
 
-            # Handle immediate exit/quit commands
-            if line_input.strip().lower() in ["exit", "quit"]:
+            if lower_stripped_line_input in ["exit", "quit"]:
+                # ... (existing exit logic) ...
                 if command_buffer:
-                    # Simple warning if there's an unexecuted command
-                    print("⚠️  Exiting. Current unexecuted command in buffer will be lost.")
+                    buffered_content_str = '\n'.join(command_buffer)
+                    preview_text = buffered_content_str
+                    max_preview_len = 80 
+                    if len(preview_text) > max_preview_len:
+                        preview_text = preview_text[:max_preview_len - 3] + "..."                     
+                    repr_preview_text = repr(preview_text)
+                    prompt_message = f"Current command buffer is not empty: {repr_preview_text}. Exit anyway? (y/n): "
+                    confirm_exit = input(prompt_message).strip().lower()
+                    if confirm_exit != 'y':
+                        print("Resuming current command input.")
+                        continue 
                 print("👋 Goodbye!")
-                break # Exit the main shell loop
+                break 
+            
+            # Handle LAUNCH NOTEBOOK as a special command
+            # This check is simple; a more robust CLI would use argparse or similar for subcommands
+            if stripped_line_input.upper().startswith("LAUNCH NOTEBOOK"):
+                if command_buffer: # If there's something else in buffer
+                    print("⚠️ Please clear or complete current command buffer before launching notebook.")
+                    print(f"   Current buffer: {repr(command_buffer)}")
+                    continue
 
-            # Append the current line to the buffer
+                parts = stripped_line_input.split()
+                port_to_use = 8888 # Default port
+                if len(parts) > 2 and parts[2].upper() == "PORT" and len(parts) > 3:
+                    try:
+                        port_to_use = int(parts[3])
+                    except ValueError:
+                        print(f"⚠️ Invalid port number '{parts[3]}'. Using default {port_to_use}.")
+                
+                launch_notebook_server(port_to_use)
+                # After launch_notebook_server returns (i.e., Jupyter server is stopped),
+                # we might want to continue the shell or exit. For now, let's continue.
+                print("ℹ️ Jupyter server session ended. Resuming KubeSol CLI.")
+                continue # Go back to prompt
+
             command_buffer.append(line_input)
             full_command_text = "\n".join(command_buffer)
 
-            # Check if the accumulated command (stripped of outer whitespace) ends with a semicolon
             if full_command_text.strip().endswith(";"):
-                command_to_execute = full_command_text # Pass the full text with internal newlines
-                
-                # Handle case where user just types ";"
+                command_to_execute = full_command_text                 
                 if command_to_execute.strip() == ";":
-                    # Silently ignore or print a message like "Empty command."
-                    # print("Empty command.") 
-                    command_buffer = [] # Reset buffer
-                    continue # Go to the next prompt
-
-                # print(f"DEBUG: Executing: {repr(command_to_execute)}") # Uncomment for debugging
+                    print("Empty command.") 
+                    command_buffer = [] 
+                    continue                 
                 execute_command(command_to_execute, namespace=current_namespace)
-                command_buffer = [] # Reset buffer for the next command
-            # If not ending with a semicolon, the loop continues to the next input()
-            # and more lines will be appended to command_buffer.
+                command_buffer = []             
             
-        except KeyboardInterrupt: # Ctrl+C
+        except KeyboardInterrupt: 
             if command_buffer:
                 print("\nCommand input cancelled. Buffer cleared.")
-                command_buffer = [] # Clear any partial command
-            else: # If buffer is empty, Ctrl+C means exit the shell
+                command_buffer = [] 
+            else: 
                 print("\n👋 Goodbye!")
                 break
-        except EOFError: # Ctrl+D
+        except EOFError: 
             print("\n👋 Goodbye!")
-            break # Exit on EOF
+            break 
         except Exception as e:
             print(f"❌ Unexpected error in shell: {e}")
-            # Clear the buffer on an unexpected error to avoid issues with the next command.
             command_buffer = [] 
+
             # Depending on the severity, you might want to break or continue here.
             # For now, it continues, allowing the user to try another command.
 
@@ -92,11 +124,9 @@ def main():
         print(f"🚨 Critical Error during K8s API client initialization check: {e}")
         exit(1) 
 
-    # 2. Select a KinD cluster
     print("ℹ️ Attempting to select a KinD cluster...")
     selected_cluster_name = select_cluster() 
 
-    # 3. Proceed to shell or exit
     if selected_cluster_name: 
         print(f"🚀 KubeSol connected to cluster: {selected_cluster_name}")
         shell() 

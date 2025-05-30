@@ -1,2 +1,15 @@
+# Core KubeSol Dependencies
 lark
 kubernetes
+
+# Jupyter Notebook Integration Dependencies
+ipykernel
+jupyterlab # Or replace with "notebook" if you prefer the classic Jupyter Notebook interface
+jupyter_client
+
+# Dependencies for GCS + PyArrow example script (and general GCS interaction)
+pyarrow
+gcsfs
+google-cloud-storage
+google-auth
+tabulate

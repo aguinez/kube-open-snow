@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "python",
+    "-m",
+    "kubeSol.notebook.kernel_launcher",
+    "-f",
+    "{connection_file}"
+  ],
+  "display_name": "KubeSol SQL",
+  "language": "sql",
+  "interrupt_mode": "signal",
+  "metadata": {
+    "debugger": false
+  }
+}
