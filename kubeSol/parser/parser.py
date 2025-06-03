@@ -1,31 +1,30 @@
 # kubeSol/parser/parser.py
 from lark import Lark
-# Asegúrate de que KubeTransformer se importe desde la ruta correcta.
-# Asumiendo que KubeTransformer está definido en kubeSol.parser.transformer
 from kubeSol.parser.transformer import KubeTransformer
 
 sql_grammar = r"""
     ?start: command [";"]
 
     // --- Regla Principal de Comandos ---
-    command: create_resource_command      // Para SECRET, CONFIGMAP, PARAMETER
-           | delete_resource_command    // Para SECRET, CONFIGMAP, PARAMETER
-           | update_resource_command    // Para SECRET, CONFIGMAP, PARAMETER
+    command: create_resource_command
+           | delete_resource_command    
+           | update_resource_command    
            | create_script_command
-           | get_command                // Comando GET UNIFICADO
+           | get_command                
            | list_scripts_command
-           | list_projects_command
+           | list_projects_command     
            | delete_script_command
-           | delete_project_command     // Usará DROP_KW
-           | delete_env_command         // Usará DROP_KW
+           | delete_project_command     
+           | delete_env_command         
            | update_script_command
-           | update_project_command
+           | update_project_command    
            | execute_script_command
            | create_project_command
            | create_env_command
            | use_project_env_command
 
     // --- Palabras Clave Principales (Terminals) ---
+    // (Keep all your keyword terminals as previously defined and corrected)
     CREATE_KW: "CREATE"i
     DELETE_KW: "DELETE"i
     UPDATE_KW: "UPDATE"i
@@ -35,7 +34,6 @@ sql_grammar = r"""
     USE_KW: "USE"i 
     DROP_KW: "DROP"i 
 
-    // Keywords de Tipo de Recurso y Lógicos
     SECRET_KW: "SECRET"i 
     CONFIGMAP_KW: "CONFIGMAP"i
     PARAMETER_KW: "PARAMETER"i 
@@ -43,7 +41,6 @@ sql_grammar = r"""
     PROJECT_KW: "PROJECT"i
     ENV_KW: "ENV"i | "ENVIRONMENT"i
     
-    // Otros Keywords para Cláusulas
     WITH_KW: "WITH"i
     ARGS_KW: "ARGS"i
     PARAMS_FROM_CONFIGMAP_KW: "PARAMS_FROM_CONFIGMAP"i
@@ -58,12 +55,11 @@ sql_grammar = r"""
     TO_KW: "TO"i
     KEY_PREFIX_KW: "KEY_PREFIX"i
 
-    // Keywords de Tipo/Motor de Script
     PYTHON_KW: "PYTHON"i
     PYSPARK_KW: "PYSPARK"i
-    SQL_SPARK_KW: "SQL_SPARK"i // Si se usa
+    SQL_SPARK_KW: "SQL_SPARK"i
     K8S_JOB_KW: "K8S_JOB"i
-    SPARK_OPERATOR_KW: "SPARK_OPERATOR"i // Si se usa
+    SPARK_OPERATOR_KW: "SPARK_OPERATOR"i
     
     // --- Definiciones para comandos de recursos estándar ---
     resource_type_value_rule: SECRET_KW | CONFIGMAP_KW | PARAMETER_KW
@@ -72,10 +68,9 @@ sql_grammar = r"""
     update_resource_command: UPDATE_KW resource_type_value_rule NAME WITH_KW fields -> update_resource
 
     fields: field ("," field)*
-    field: NAME "=" ESCAPED_STRING
+    field: NAME "=" ESCAPED_STRING // NAME here is the key of the field
 
     // --- Extensiones de Lenguaje para Scripts ---
-    // script_name es simplemente un NAME, no necesita regla separada si se usa NAME directamente
     create_script_command: CREATE_KW SCRIPT_KW NAME TYPE_KW script_type_value [ENGINE_KW script_engine_value] WITH_KW script_content_fields -> create_script
     script_content_fields: script_content_field ("," script_content_field)*
     script_content_field: "CODE"i "=" ESCAPED_STRING -> script_code_field
@@ -99,7 +94,7 @@ sql_grammar = r"""
     custom_params: custom_param ("," custom_param)*
     custom_param: NAME "=" ESCAPED_STRING
     with_params_cm_clause: WITH_KW PARAMS_FROM_CONFIGMAP_KW NAME [KEY_PREFIX_KW ESCAPED_STRING] 
-    quoted_string_value: ESCAPED_STRING 
+    quoted_string_value: ESCAPED_STRING
     secret_mount_clause: WITH_KW SECRET_KW NAME KEY_KW quoted_string_value AS_KW quoted_string_value -> map_secret_mount
     execute_script_command: EXECUTE_KW SCRIPT_KW NAME \
                             [with_args_clause] \
@@ -108,61 +103,41 @@ sql_grammar = r"""
                             -> execute_script
 
     // --- Reglas para Gestión de Proyectos y Entornos ---
-    // CREATE PROJECT <user_project_name>
     create_project_command: CREATE_KW PROJECT_KW NAME -> create_project_cmd
 
-    // Sub-reglas para CREATE ENV y DELETE ENV (usando FOR o FROM)
     project_target_clause_project_name_ref: PROJECT_KW NAME -> specified_project_name_transformer
     project_target_clause_this_project_ref: THIS_KW PROJECT_KW -> this_project_transformer
     project_target_clause: (FOR_KW | FROM_KW) (project_target_clause_project_name_ref | project_target_clause_this_project_ref)
-    
     create_env_command: CREATE_KW ENV_KW NAME [project_target_clause] -> create_env_cmd
 
-    // LIST PROJECTS
     list_projects_command: LIST_KW PROJECT_KW "S"? -> list_projects_cmd 
 
-    // --- REGLAS GET UNIFICADAS (CORREGIDO Y FINAL) ---
+    // --- REGLAS GET UNIFICADAS ---
     get_script_target_payload: SCRIPT_KW NAME -> get_script_target_transformer
     get_project_by_name_payload: PROJECT_KW NAME -> get_project_by_name_transformer
     get_this_project_payload: THIS_KW PROJECT_KW -> get_this_project_transformer
-
-    // get_target_choice permite una de las tres variantes de payload
     get_target_choice: get_script_target_payload
                      | get_project_by_name_payload
                      | get_this_project_payload
-    
-    // Comando GET principal unificado
     get_command: GET_KW get_target_choice -> get_command_transformer
-    // NOTA: En la regla `command` principal, solo se lista `get_command`.
-
-    // UPDATE PROJECT <old_project_name> TO <new_project_name>
-    update_project_command: UPDATE_KW PROJECT_KW NAME TO_KW NAME -> update_project_cmd
-
-    // DROP PROJECT <project_name>
-    delete_project_command: DROP_KW PROJECT_KW NAME -> drop_project_cmd 
-
-    // DROP ENV <env_name> [ (FOR | FROM) PROJECT <project_name> | (FOR | FROM) THIS PROJECT ]
-    delete_env_command: DROP_KW ENV_KW NAME [project_target_clause] -> drop_env_cmd 
     
-    // USE PROJECT <project_name> ENV <env_name>
+    update_project_command: UPDATE_KW PROJECT_KW NAME TO_KW NAME -> update_project_cmd
+    delete_project_command: DROP_KW PROJECT_KW NAME -> drop_project_cmd 
+    delete_env_command: DROP_KW ENV_KW NAME [project_target_clause] -> drop_env_cmd 
     use_project_env_command: USE_KW PROJECT_KW NAME ENV_KW NAME -> use_project_env_cmd
 
     // --- Terminales Comunes ---
-    NAME: /[a-zA-Z0-9]([-a-zA-Z0-9_]*[a-zA-Z0-9])?/ 
-    // ESCAPED_STRING se importa de common.ESCAPED_STRING
+    // NAME modificado para permitir puntos y guiones bajos internamente,
+    // y asegurar que no empiece/termine con ellos si es un solo carácter.
+    // Esto debería permitir que "file_key.json" sea un solo token NAME.
+    NAME: /[a-zA-Z0-9]([a-zA-Z0-9_.-]*[a-zA-Z0-9_])?|[a-zA-Z0-9]/
 
     %import common.ESCAPED_STRING 
-    %import common.WS             // Espacio en blanco estándar de Lark (incluye \n, \t, etc.)
-    %ignore WS                    // Ignorar globalmente el espacio en blanco entre tokens
+    %import common.WS             
+    %ignore WS                   
 """
 
-# Inicializar el parser de Lark con la gramática y el transformador definidos.
 kube_sol_parser = Lark(sql_grammar, parser="lalr", transformer=KubeTransformer(), maybe_placeholders=True) 
 
 def parse_sql(input_sql_command: str) -> dict: 
-    """
-    Parsea el string del comando SQL-like de KubeSol.
-    Devuelve un diccionario que representa la instrucción parseada y transformada.
-    """
-    # print(f"DEBUG PARSER: Attempting to parse: {repr(input_sql_command)}") # Para depuración si es necesario
     return kube_sol_parser.parse(input_sql_command)
