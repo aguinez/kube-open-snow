@@ -138,3 +138,18 @@ USE PROJECT TestFinal ENV staging;
 -- 10. Crear un proyecto con el mismo nombre de visualización (debería fallar)
 CREATE PROJECT TestFinal;
 -- SALIDA ESPERADA: Error "Project with display name 'testfinal' already exists".
+
+
+CREATE SECRET gcs-sa-writer-key WITH file_key.json="SOL/aguinez-assets-9c9373a1f66b.json";
+
+CREATE SCRIPT write-gcs-parquet-job TYPE PYTHON ENGINE K8S_JOB WITH
+    CODE_FROM_FILE="/scripts/write_gcs/script.py",
+    DESCRIPTION="Script para escribir un archivo Parquet en GCS, usando argumentos y secretos.";
+
+EXECUTE SCRIPT write_gcs_parquet_job
+    WITH ARGS (
+        gcs_key_file_path_arg="/mnt/secret-keys/gcs_service_account.json",
+        gcs_bucket_name_arg="data-for-training" 
+        -- output_sub_directory="output_desde_kubesol" -- Argumento opcional si lo añadiste al script
+    )
+    WITH SECRET gcs-sa-writer-key KEY "key.json" AS "/mnt/secret-keys/gcs_service_account.json";

@@ -81,15 +81,26 @@ class KubeTransformer(Transformer):
 
     # --- Transformadores para Campos de Contenido de Script (CREATE SCRIPT) ---
     @v_args(inline=True)
-    def script_code_field(self, code_literal, eq_literal, value_str): return (constants.SCRIPT_CM_KEY_CODE, value_str)
+    def script_code_field(self, value_str: str): # Assuming "CODE" and "=" are literals not passed
+        # If "CODE"i was a terminal CODE_KW with a transformer, it would be an argument here.
+        # For simplicity, assuming it's just one value if rule is like: "CODE"i "=" ESCAPED_STRING
+        return (constants.SCRIPT_CM_KEY_CODE, value_str)
     @v_args(inline=True)
-    def script_code_from_file_field(self, code_from_file_literal, eq_literal, file_path_str): return (constants.SCRIPT_CM_KEY_CODE_FROM_FILE, file_path_str)
+    def script_code_from_file_field(self, file_path_str: str): # Corrected signature
+        # This method is called for the rule: "CODE_FROM_FILE"i "=" ESCAPED_STRING -> script_code_from_file_field
+        # With @v_args(inline=True), only the transformed result of ESCAPED_STRING is passed
+        # if "CODE_FROM_FILE"i and "=" are treated as literals and skipped.
+        print(f"[DEBUG TRANSFORMER] script_code_from_file_field received path: {file_path_str}")
+        return (constants.SCRIPT_CM_KEY_CODE_FROM_FILE, file_path_str)
     @v_args(inline=True)
-    def script_params_spec_field(self, params_spec_literal, eq_literal, value_str): return (constants.SCRIPT_CM_KEY_PARAMS_SPEC, value_str)
-    @v_args(inline=True)
-    def script_description_field(self, description_literal, eq_literal, value_str): return (constants.SCRIPT_CM_KEY_DESCRIPTION, value_str)
-    def script_content_fields(self, field_tuples_list: list): return dict(field_tuples_list)
-
+    def script_params_spec_field(self, value_str: str): # Corrected signature
+        return (constants.SCRIPT_CM_KEY_PARAMS_SPEC, value_str)    @v_args(inline=True)
+    def script_description_field(self, value_str: str): # Corrected signature
+        return (constants.SCRIPT_CM_KEY_DESCRIPTION, value_str)
+    def script_content_fields(self, field_tuples_list: list): 
+        # This method receives a list of tuples from the methods above.
+        # e.g., [ ("codeFromFilePath", "/path/to/file.py"), ("description", "A script") ]
+        return dict(field_tuples_list)
     # --- Transformadores para Comandos de Recursos Estándar ---
     @v_args(inline=True)
     def create_resource(self, create_kw_val, resource_type_val, name_str, with_kw_val, fields_dict):
@@ -107,15 +118,47 @@ class KubeTransformer(Transformer):
 
     # --- Transformadores para Comandos de Script ---
     @v_args(inline=True)
-    def create_script(self, create_kw_val, script_keyword_val, script_name_str, type_keyword_val, script_type_val, 
-                      optional_engine_block, # Lista: [ENGINE_KW_val, script_engine_val] o vacía
-                      with_keyword_val, script_content_fields_dict):
-        details = script_content_fields_dict
+    def create_script(self, 
+                      create_kw_val,        # From CREATE_KW
+                      script_keyword_val,   # From SCRIPT_KW
+                      script_name_str,      # From NAME
+                      type_keyword_val,     # From TYPE_KW
+                      script_type_val,      # From script_type_value
+                      # For the optional block: [ENGINE_KW script_engine_value]
+                      # If present, engine_kw_arg and engine_val_arg will be populated.
+                      # If not present, they will be None if maybe_placeholders=True in Lark()
+                      # and if they are correctly handled as optional by Lark's tree building.
+                      # A common way @v_args(inline=True) handles an optional group [a b]
+                      # is by passing the transformed values of a and b if the group matches.
+                      # If the group doesn't match, fewer arguments are passed overall,
+                      # or placeholders (None) are passed if Lark is configured with maybe_placeholders=True
+                      # and the grammar allows it cleanly.
+                      # Let's assume they are passed if present.
+                      # The error "10 were given" means they *were* passed.
+                      # The error "takes 9" means the signature was missing one.
+                      # Previous signature had 8 args after self:
+                      # create_kw, script_kw, name, type_kw, type_val, engine_block (1), with_kw, content_fields
+                      # If engine_block expands to 2 args (engine_kw, engine_val), then we need 9 args after self.
+                      engine_keyword_val,     # From ENGINE_KW (if present)
+                      script_engine_val,    # From script_engine_value (if present)
+                      with_keyword_val,       # From WITH_KW
+                      script_content_fields_dict # From script_content_fields
+                     ):
+        
+        details = script_content_fields_dict 
         details[constants.SCRIPT_CM_KEY_TYPE] = script_type_val
-        if optional_engine_block: # Si la lista no está vacía
-            details[constants.SCRIPT_CM_KEY_ENGINE] = optional_engine_block[1] # el valor del engine
-        return {"action": constants.ACTION_CREATE, "type": constants.RESOURCE_SCRIPT, 
-                "name": script_name_str.lower(), "details": details}
+        
+        # Check if engine values were actually passed (they would not be None if the optional group matched)
+        # The error implies they *are* being passed.
+        if script_engine_val is not None: # engine_keyword_val would also be present
+            details[constants.SCRIPT_CM_KEY_ENGINE] = script_engine_val
+        
+        return {
+            "action": constants.ACTION_CREATE, 
+            "type": constants.RESOURCE_SCRIPT, 
+            "name": script_name_str.lower(), 
+            "details": details
+        }
     
     @v_args(inline=True)
     def list_scripts(self, list_keyword_val, script_keyword_val, plural_s_token=None):
