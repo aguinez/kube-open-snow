@@ -11,6 +11,21 @@ ACTION_GET = "GET"
 ACTION_LIST = "LIST"
 ACTION_EXECUTE = "EXECUTE"
 
+# --- New Project/Environment Action Types ---
+ACTION_CREATE_PROJECT = "CREATE_PROJECT"
+ACTION_CREATE_ENV = "CREATE_ENV"
+ACTION_LIST_PROJECTS = "LIST_PROJECTS"
+ACTION_GET_PROJECT = "GET_PROJECT"       # Gets details of a project (its environments)
+ACTION_UPDATE_PROJECT = "UPDATE_PROJECT"   # Updates project display name
+ACTION_DROP_PROJECT = "DROP_PROJECT"       # Deletes a whole project (all its envs/namespaces)
+ACTION_DROP_ENV = "DROP_ENV"         # Deletes a specific environment from a project
+ACTION_USE_PROJECT_ENV = "USE_PROJECT_ENV" # Sets the current context
+
+LOGICAL_TYPE_PROJECT = "PROJECT_LOGICAL" # To signify operations on the project abstraction
+LOGICAL_TYPE_ENVIRONMENT = "ENVIRONMENT_LOGICAL" # To signify operations on the environment abstraction
+# The actual Kubernetes resource being manipulated is Namespace, but these help route commands.
+
+
 # Resource Types
 RESOURCE_SECRET = "SECRET"
 RESOURCE_CONFIGMAP = "CONFIGMAP"
@@ -41,3 +56,12 @@ FIELD_SCRIPT = "script"
 
 # Default Values
 DEFAULT_NAMESPACE = "default"
+
+# --- Project and Environment Management Constants ---
+# Labels to be applied to namespaces managed by KubeSol as projects/environments
+PROJECT_ID_LABEL_KEY = "kubesol.io/project-id"       # Stores the unique, immutable ID of the KubeSol project
+PROJECT_NAME_LABEL_KEY = "kubesol.io/project-name"    # Stores the user-defined, mutable display name of the project
+ENVIRONMENT_LABEL_KEY = "kubesol.io/environment"    # Stores the environment name (e.g., dev, staging, prod)
+
+# Default environment name created with a new project
+DEFAULT_PROJECT_ENVIRONMENT = "dev"

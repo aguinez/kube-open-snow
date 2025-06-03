@@ -1,0 +1,140 @@
+-- Inicia en el contexto por defecto, ej: (default) >>
+
+-- 1. Comandos Iniciales y Creación del Primer Proyecto
+LIST PROJECTS;
+-- SALIDA ESPERADA: "No KubeSol projects found." o una tabla vacía.
+
+CREATE PROJECT MiPrimeraApp;
+-- SALIDA ESPERADA: Mensaje de creación exitosa para 'miprimeraapp' (ID: proj-...), entorno 'dev'.
+-- KubeSol debería preguntar: "Project 'miprimeraapp' created. Switch to its default environment 'dev' (namespace 'proj-xxxx-dev')? (y/n):"
+-- RESPONDE: y
+-- El prompt debería cambiar a: (miprimeraapp/dev) >>
+
+LIST PROJECTS;
+-- SALIDA ESPERADA: Tabla con "miprimeraapp", su ID, y 1 entorno (o la lista "dev").
+
+GET THIS PROJECT;
+-- SALIDA ESPERADA: Tabla detallando el entorno "dev" para el proyecto "miprimeraapp".
+
+-- 2. Gestionando Entornos dentro del Proyecto Actual
+CREATE ENV Staging FOR THIS PROJECT;
+-- SALIDA ESPERADA: Mensaje de creación exitosa del entorno "staging" para "miprimeraapp".
+-- El namespace sería <id_miprimeraapp>-staging.
+
+CREATE ENV Production FOR PROJECT MiPrimeraApp; -- Especificando el nombre del proyecto
+-- SALIDA ESPERADA: Mensaje de creación exitosa del entorno "production" para "miprimeraapp".
+
+GET THIS PROJECT;
+-- SALIDA ESPERADA: Tabla mostrando los entornos "dev", "production", "staging" para "miprimeraapp".
+
+-- 3. Creando un Segundo Proyecto y Cambiando de Contexto
+CREATE PROJECT OtroProyecto;
+-- SALIDA ESPERADA: Mensaje de creación.
+-- Cuando pregunte si quieres cambiar al contexto 'otroproyecto/dev', responde: n
+-- (El prompt debería seguir siendo (miprimeraapp/dev) >> o el último activo)
+
+LIST PROJECTS;
+-- SALIDA ESPERADA: Tabla mostrando "miprimeraapp" y "otroproyecto".
+
+GET PROJECT OtroProyecto;
+-- SALIDA ESPERADA: Tabla mostrando el entorno "dev" para el proyecto "otroproyecto".
+
+USE PROJECT OtroProyecto ENV dev;
+-- SALIDA ESPERADA: Mensaje de cambio de contexto.
+-- El prompt debería cambiar a: (otroproyecto/dev) >>
+
+CREATE ENV test FOR THIS PROJECT;
+GET THIS PROJECT;
+-- SALIDA ESPERADA: Tabla mostrando "dev" y "test" para "otroproyecto".
+
+-- 4. Volver al primer proyecto y probar la actualización del nombre de visualización
+USE PROJECT MiPrimeraApp ENV production;
+-- SALIDA ESPERADA: Mensaje de cambio de contexto.
+-- El prompt debería cambiar a: (miprimeraapp/production) >>
+
+UPDATE PROJECT MiPrimeraApp TO AppRenombrada;
+-- SALIDA ESPERADA: Mensaje de actualización exitosa.
+-- El prompt debería actualizarse a: (apprenombrada/production) >>
+
+LIST PROJECTS;
+-- SALIDA ESPERADA: Tabla mostrando "apprenombrada" y "otroproyecto".
+
+GET PROJECT AppRenombrada;
+-- SALIDA ESPERADA: Debería mostrar los entornos del proyecto que antes se llamaba "miprimeraapp".
+
+GET PROJECT MiPrimeraApp; -- Intentar obtener con el nombre antiguo
+-- SALIDA ESPERADA: Error o mensaje "Project with display name 'miprimeraapp' not found."
+
+-- 5. Intentar actualizar a un nombre de visualización ya en uso (por otro project_id)
+CREATE PROJECT ConflictoNombre;
+-- Responde 'y' para usarlo: (conflictonombre/dev) >>
+UPDATE PROJECT OtroProyecto TO ConflictoNombre;
+-- SALIDA ESPERADA: Error, porque "conflictonombre" ya está en uso por otro project_id.
+-- Vuelve al contexto de AppRenombrada para las siguientes pruebas:
+USE PROJECT AppRenombrada ENV production;
+
+-- 6. Eliminando Entornos
+-- El contexto actual es (apprenombrada/production) >>
+DROP ENVIRONMENT production FROM THIS PROJECT;
+-- SALIDA ESPERADA: Pedirá confirmación. Escribe 'yes'.
+-- Debería eliminar el entorno 'production'.
+-- El contexto debería actualizarse (ej. a 'apprenombrada/dev' si existe, o al namespace global 'default').
+-- Observa el mensaje sobre la actualización del contexto y el nuevo prompt.
+
+-- Asumamos que 'dev' aún existe para 'apprenombrada'. Vamos a usarlo.
+USE PROJECT AppRenombrada ENV dev;
+-- El prompt debería ser (apprenombrada/dev) >>
+
+GET PROJECT AppRenombrada;
+-- SALIDA ESPERADA: La tabla ya no debería mostrar el entorno "production". Mostrará "dev".
+
+DROP ENVIRONMENT dev FROM PROJECT AppRenombrada;
+-- SALIDA ESPERADA: Pedirá confirmación. Escribe 'yes'.
+-- El contexto debería limpiarse o cambiar al namespace 'default' ya que era el último entorno del proyecto activo.
+
+GET PROJECT AppRenombrada;
+-- SALIDA ESPERADA: Mensaje indicando que no se encontraron entornos para "apprenombrada",
+-- o que el proyecto en sí no se encuentra si la lógica de `get_environments_for_project`
+-- considera un proyecto sin entornos como "no encontrado" a través de ese método.
+-- Lo ideal es que muestre el proyecto pero con 0 entornos.
+
+-- 7. Probando casos de error para DROP ENVIRONMENT
+-- Asumamos que el contexto es (default) >> o un proyecto diferente.
+USE PROJECT OtroProyecto ENV test; -- Asegura un contexto
+DROP ENVIRONMENT entornoinexistente FROM THIS PROJECT;
+-- SALIDA ESPERADA: Mensaje de error "Environment 'entornoinexistente' not found...".
+
+DROP ENVIRONMENT dev FROM PROJECT ProyectoQueNoExiste;
+-- SALIDA ESPERADA: Mensaje de error "Project with display name 'proyectoquenoexiste' not found...".
+
+-- 8. Eliminando Proyectos Completos
+-- El contexto actual es (otroproyecto/test) >>
+DROP PROJECT OtroProyecto;
+-- SALIDA ESPERADA: Pedirá confirmación fuerte (escribir "otroproyecto").
+-- Eliminará todos los entornos de "otroproyecto" (dev, test).
+-- El contexto actual debería limpiarse a "(default) >> " ya que el proyecto activo fue eliminado.
+
+LIST PROJECTS;
+-- SALIDA ESPERADA: Tabla vacía o solo proyectos que no hayas eliminado. (Si solo creaste WebApp1/AppRenombrada y OtroProyecto/DataPipeline y los eliminaste todos menos los entornos de AppRenombrada, solo AppRenombrada quedaría).
+-- Si AppRenombrada ya no tiene entornos, ¿cómo se comporta LIST PROJECTS? Debería mostrarlo si la etiqueta project-id aún existe en algún namespace (aunque no debería si todos los entornos fueron borrados).
+-- LIST PROJECTS busca namespaces con la etiqueta project-id. Si DROP PROJECT elimina todos sus namespaces, el proyecto ya no aparecerá.
+
+-- Si AppRenombrada aún existe (porque tenía entornos y no fue borrado):
+DROP PROJECT AppRenombrada;
+-- SALIDA ESPERADA: Confirmación fuerte. Luego eliminación.
+
+LIST PROJECTS;
+-- SALIDA ESPERADA: "No KubeSol projects found..."
+
+-- 9. Casos de error para USE PROJECT ENV
+USE PROJECT ProyectoQueNoExiste ENV dev;
+-- SALIDA ESPERADA: Error "Project ... not found".
+
+CREATE PROJECT TestFinal;
+-- Responde 'y' para usar contexto (TestFinal/dev) >>
+USE PROJECT TestFinal ENV staging;
+-- SALIDA ESPERADA: Error "Environment 'staging' ... not found".
+
+-- 10. Crear un proyecto con el mismo nombre de visualización (debería fallar)
+CREATE PROJECT TestFinal;
+-- SALIDA ESPERADA: Error "Project with display name 'testfinal' already exists".
