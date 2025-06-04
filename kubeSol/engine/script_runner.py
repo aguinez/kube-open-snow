@@ -135,18 +135,16 @@ def run_script_as_k8s_job(
 
     script_cm_name_on_k8s = k8s_api.get_script_cm_name(cli_script_name)
 
-
     job_created = k8s_api.create_k8s_job(
         job_name=k8s_job_name,
         namespace=namespace,
         image=image,
         script_configmap_name=script_cm_name_on_k8s,
-        script_file_key_in_cm=SCRIPT_CM_KEY_CODE, 
-        script_mount_path=script_mount_dir,      
-        container_command=container_command_list,      
+        script_file_key_in_cm=SCRIPT_CM_KEY_CODE,
+        script_mount_path=script_mount_dir,
+        container_command=container_command_list,
         container_args=script_cmd_args,
-        env_vars=job_env_vars, # Pass the env_vars for the job
-        # NEW: Pass the secret mount configurations
+        env_vars=job_env_vars,
         secret_volume_mount_configs=secret_mounts
     )
 
