@@ -54,6 +54,7 @@ sql_grammar = r"""
     THIS_KW: "THIS"i
     TO_KW: "TO"i
     KEY_PREFIX_KW: "KEY_PREFIX"i
+    DEPENDING_KW: "DEPENDING"i 
 
     PYTHON_KW: "PYTHON"i
     PYSPARK_KW: "PYSPARK"i
@@ -108,6 +109,8 @@ sql_grammar = r"""
     project_target_clause_project_name_ref: PROJECT_KW NAME -> specified_project_name_transformer
     project_target_clause_this_project_ref: THIS_KW PROJECT_KW -> this_project_transformer
     project_target_clause: (FOR_KW | FROM_KW) (project_target_clause_project_name_ref | project_target_clause_this_project_ref)
+    depending_from_clause: DEPENDING_KW FROM_KW ENV_KW NAME -> depending_from_clause
+
     create_env_command: CREATE_KW ENV_KW NAME [project_target_clause] -> create_env_cmd
 
     list_projects_command: LIST_KW PROJECT_KW "S"? -> list_projects_cmd 

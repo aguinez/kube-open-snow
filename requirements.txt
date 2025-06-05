@@ -13,3 +13,4 @@ gcsfs
 google-cloud-storage
 google-auth
 tabulate
+PyGithub

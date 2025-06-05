@@ -65,3 +65,17 @@ ENVIRONMENT_LABEL_KEY = "kubesol.io/environment"    # Stores the environment nam
 
 # Default environment name created with a new project
 DEFAULT_PROJECT_ENVIRONMENT = "dev"
+
+GITHUB_ORG_OR_USER = "aguinez" # Por ejemplo: "my-company" o "my-github-username"
+GITHUB_TOKEN_SECRET_NAME = "kubesol-github-token"      # Nombre del Secret de K8s que contiene el PAT
+GITHUB_REPO_PREFIX = "kubesol-project-"                        # Prefijo para los repositorios de KubeSol (ej: kubesol-myproject)
+GITHUB_DEFAULT_BRANCH_NAME = "main"                    # Rama por defecto al crear un nuevo repo (suele ser 'main' o 'master')
+GITHUB_DEV_BRANCH_NAME = "develop"                     # Rama específica para el entorno 'dev'
+GITHUB_SCRIPTS_FOLDER = "scripts"                      # Carpeta donde se guardarán los scripts en el repo
+
+# Labels adicionales para los namespaces de KubeSol para almacenar información de GitHub
+PROJECT_REPO_NAME_LABEL_KEY = "kubesol.io/github-repo-name" # Nombre del repositorio de GitHub
+PROJECT_REPO_URL_ANNOTATION_KEY = "kubesol.io/github-repo-url"   # URL del repositorio de GitHub
+
+# --- New Action Type for Promote ---
+ACTION_PROMOTE = "PROMOTE"

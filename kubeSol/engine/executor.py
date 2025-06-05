@@ -8,7 +8,7 @@ from kubeSol.constants import (
     ACTION_CREATE, ACTION_DELETE, ACTION_UPDATE, ACTION_GET, ACTION_LIST, ACTION_EXECUTE,
     RESOURCE_SECRET, RESOURCE_CONFIGMAP, RESOURCE_PARAMETER, RESOURCE_SCRIPT,
     FIELD_SCRIPT, DEFAULT_NAMESPACE,
-    SCRIPT_CM_KEY_CODE, SCRIPT_CM_KEY_TYPE, SCRIPT_CM_KEY_ENGINE, 
+    SCRIPT_CM_KEY_CODE, SCRIPT_CM_KEY_TYPE, SCRIPT_CM_KEY_ENGINE,
     SCRIPT_CM_KEY_PARAMS_SPEC, SCRIPT_CM_KEY_DESCRIPTION, SCRIPT_CM_KEY_CODE_FROM_FILE,
     SCRIPT_ENGINE_K8S_JOB, SCRIPT_ENGINE_SPARK_OPERATOR,
     # NUEVAS CONSTANTES DE ACCIÓN Y TIPOS LÓGICOS
@@ -169,85 +169,84 @@ COMMAND_HANDLERS = {
     (ACTION_DROP_PROJECT, LOGICAL_TYPE_PROJECT): project_cli_handlers.handle_drop_project,
     (ACTION_DROP_ENV, LOGICAL_TYPE_ENVIRONMENT): project_cli_handlers.handle_drop_environment,
     (ACTION_USE_PROJECT_ENV, LOGICAL_TYPE_PROJECT): project_cli_handlers.handle_use_project_environment,
+
+    (ACTION_CREATE_PROJECT, LOGICAL_TYPE_PROJECT): project_cli_handlers.handle_create_project,
+    (ACTION_CREATE_ENV, LOGICAL_TYPE_ENVIRONMENT): project_cli_handlers.handle_create_environment, # No cambia el target_handler_func
 }
 
 # execute_command ahora acepta KubeSolContext
-def execute_command(command_string: str, context: KubeSolContext): # <--- MODIFICADO para aceptar context
+def execute_command(command_string: str, context: KubeSolContext):
     """
     Parsea y ejecuta un comando de KubeSol usando el contexto proporcionado.
     """
     try:
-        parsed_instruction = parse_sql(command_string) 
-        print(f"🧾 Parsed: {parsed_instruction}") # Dejar para depuración por ahora
-    except Exception as e: 
+        parsed_instruction = parse_sql(command_string)
+        print(f"🧾 Parsed: {parsed_instruction}")
+    except Exception as e:
         print(f"❌ Error parsing command.")
         print(f"   Type: {type(e)}, Details: {e}")
         import traceback
         traceback.print_exc()
         return
 
-    action_type = parsed_instruction.get("action") 
-    command_object_type = parsed_instruction.get("type") # Será LOGICAL_TYPE_* o RESOURCE_*
-    
-    handler_lookup_key = (action_type, command_object_type) 
-    target_handler_func = COMMAND_HANDLERS.get(handler_lookup_key) 
+    action_type = parsed_instruction.get("action")
+    command_object_type = parsed_instruction.get("type")
+
+    handler_lookup_key = (action_type, command_object_type)
+    target_handler_func = COMMAND_HANDLERS.get(handler_lookup_key)
 
     if not target_handler_func:
         print(f"❌ Command not supported: Action '{action_type}' for type '{command_object_type}'.")
         return
-    
-    # Determinar el namespace actual para operaciones de recursos
+
     current_k8s_namespace = context.current_namespace
 
     try:
-        # Diferenciar cómo se llaman los handlers
         if command_object_type in [LOGICAL_TYPE_PROJECT, LOGICAL_TYPE_ENVIRONMENT] or \
-           action_type == ACTION_USE_PROJECT_ENV: # USE_PROJECT_ENV actualiza el contexto
+           action_type == ACTION_USE_PROJECT_ENV:
             # Los handlers de proyecto/entorno esperan (parsed_args_dict, context_obj)
             target_handler_func(parsed_args=parsed_instruction, context=context)
         else:
-            # Los handlers de recursos existentes esperan argumentos específicos
+            # ... (resto de la lógica de despacho para recursos existentes) ...
             resource_identifier = parsed_instruction.get("name")
             if action_type == ACTION_EXECUTE:
                 target_handler_func(
                     script_name_to_exec=resource_identifier,
-                    parsed_instruction_details=parsed_instruction, 
+                    parsed_instruction_details=parsed_instruction,
                     namespace=current_k8s_namespace
                 )
             elif action_type == ACTION_CREATE:
-                details_map = parsed_instruction.get("details") 
-                fields_map = parsed_instruction.get("fields")   
+                details_map = parsed_instruction.get("details")
+                fields_map = parsed_instruction.get("fields")
                 if command_object_type == RESOURCE_SCRIPT:
                     if details_map is None: raise ValueError("'details' required for CREATE SCRIPT.")
                     target_handler_func(name=resource_identifier, details=details_map, namespace=current_k8s_namespace)
-                else: 
+                else:
                     if fields_map is None: raise ValueError(f"Fields required for CREATE {command_object_type}.")
                     target_handler_func(name=resource_identifier, fields=fields_map, namespace=current_k8s_namespace)
             elif action_type == ACTION_UPDATE:
                 if command_object_type == RESOURCE_SCRIPT:
-                    updates_data = parsed_instruction.get("updates") 
+                    updates_data = parsed_instruction.get("updates")
                     if updates_data is None: raise ValueError("'updates' required for UPDATE SCRIPT.")
                     target_handler_func(name=resource_identifier, updates=updates_data, namespace=current_k8s_namespace)
-                else: 
-                    fields_data = parsed_instruction.get("fields") 
+                else:
+                    fields_data = parsed_instruction.get("fields")
                     if fields_data is None: raise ValueError(f"Fields required for UPDATE {command_object_type}.")
                     target_handler_func(name=resource_identifier, fields=fields_data, namespace=current_k8s_namespace)
             elif action_type == ACTION_GET or action_type == ACTION_DELETE:
                 if resource_identifier is None: raise ValueError(f"Resource name required for {action_type} {command_object_type}.")
-                if action_type == ACTION_DELETE and command_object_type in [RESOURCE_SECRET, RESOURCE_CONFIGMAP, RESOURCE_PARAMETER]: 
+                if action_type == ACTION_DELETE and command_object_type in [RESOURCE_SECRET, RESOURCE_CONFIGMAP, RESOURCE_PARAMETER]:
                      target_handler_func(name=resource_identifier, resource_type=command_object_type, namespace=current_k8s_namespace)
-                else: 
+                else:
                      target_handler_func(name=resource_identifier, namespace=current_k8s_namespace)
             elif action_type == ACTION_LIST:
-                # LIST_PROJECTS es manejado por project_cli_handlers
-                # LIST_SCRIPTS (y otras listas de recursos) solo necesitan namespace
                 target_handler_func(namespace=current_k8s_namespace)
             else:
                 print(f"❌ Internal Error: Dispatch failed for {action_type} {command_object_type}")
 
-    except ValueError as ve: 
+    except ValueError as ve:
         print(f"❌ Validation Error: {ve}")
-    except K8sApiException as kube_api_error: 
+    except K8sApiException as kube_api_error:
         k8s_api._print_api_exception_details(kube_api_error, f"K8s API error during '{action_type} {command_object_type}' operation for '{parsed_instruction.get('name', '')}'")
     except Exception as e:
         print(f"❌ Unexpected error executing command '{action_type} {command_object_type}': {type(e).__name__} - {e}")

@@ -1,12 +1,11 @@
+# kubeSol/engine/k8s_api.py
 from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
-from kubeSol.constants import ( #
+from kubeSol.constants import (
     DEFAULT_NAMESPACE,
     SCRIPT_CM_PREFIX, 
     SCRIPT_CM_LABEL_ROLE, 
     SCRIPT_CM_LABEL_ROLE_VALUE_SCRIPT,
-    # Add new project/env label constants if k8s_api needs to be aware of them directly,
-    # though typically manager.py would construct label_selectors.
 )
 import json
 import re
@@ -16,7 +15,7 @@ import os
 
 try:
     config.load_kube_config()
-    core_v1_api = client.CoreV1Api() # Used for most namespaced resources and namespaces themselves
+    core_v1_api = client.CoreV1Api()
 except config.ConfigException as e:
     print(f"🚨 Critical Error: Could not load Kubernetes configuration: {e}\n   Please ensure your kubeconfig is correctly set up.")
     core_v1_api = None 
@@ -64,6 +63,32 @@ def _sanitize_for_k8s_name(input_name: str) -> str:
 
 
 # --- SECRETS ---
+def get_secret_data(name: str, namespace: str = DEFAULT_NAMESPACE) -> dict | None:
+    """
+    Retrieves the data from a Kubernetes Secret.
+    The data values are base64 decoded.
+    """
+    api = get_api_client()
+    try:
+        secret = api.read_namespaced_secret(name=name, namespace=namespace)
+        if secret.data:
+            decoded_data = {
+                key: base64.b64decode(value).decode('utf-8')
+                for key, value in secret.data.items()
+            }
+            return decoded_data
+        return {}
+    except ApiException as e:
+        if e.status == 404:
+            print(f"🤷 Secret '{name}' not found in namespace '{namespace}'.")
+        else:
+            _print_api_exception_details(e, f"Error getting Secret '{name}' in namespace '{namespace}'")
+        return None
+    except Exception as e:
+        print(f"❌ Unexpected error getting Secret '{name}': {type(e).__name__} - {e}")
+        traceback.print_exc()
+        return None
+
 def create_secret(name: str, data: dict, namespace: str = DEFAULT_NAMESPACE):
     """
     Original function to create a Kubernetes Secret with string data.
@@ -75,7 +100,7 @@ def create_secret(name: str, data: dict, namespace: str = DEFAULT_NAMESPACE):
         api_version="v1",
         kind="Secret",
         metadata=metadata,
-        string_data=data  # Assumes 'data' is purely for stringData
+        string_data=data
     )
     try:
         api.create_namespaced_secret(namespace=namespace, body=secret_body)
@@ -327,66 +352,27 @@ def update_script_configmap(script_name: str, updates: dict, namespace: str = DE
 
 # --- KUBERNETES JOBS ---
 def create_k8s_job(job_name: str, namespace: str, image: str,
-                  script_configmap_name: str,
-                  script_file_key_in_cm: str,
-                  script_mount_path: str,
-                  container_command: list[str] | None = None,
-                  container_args: list[str] | None = None,
-                  env_vars: list[client.V1EnvVar] | None = None,
-                  pod_restart_policy: str = "Never",
+                  script_configmap_name: str, 
+                  script_file_key_in_cm: str, 
+                  script_mount_path: str,     
+                  container_command: list[str] | None = None, 
+                  container_args: list[str] | None = None,    
+                  env_vars: list[client.V1EnvVar] | None = None, 
+                  pod_restart_policy: str = "Never", 
                   secret_volume_mount_configs: list[dict] | None = None,
-                  job_backoff_limit: int = 0,
-                  job_active_deadline_seconds: int | None = 300
+                  job_backoff_limit: int = 0, # Intentos de pod = job_backoff_limit + 1
+                  job_active_deadline_seconds: int | None = 300 # Límite de tiempo total para el job
                   ) -> bool:
     """
     Creates a Kubernetes Job with PodFailurePolicy and controlled retries.
-    Includes pre-validation for referenced secrets and their keys.
     """
-    core_api = get_api_client()
-    batch_v1_api = client.BatchV1Api(core_api.api_client)
-
-    # --- NUEVA LÓGICA DE VALIDACIÓN DE SECRETOS ---
-    if secret_volume_mount_configs:
-        print("ℹ️ Performing pre-validation of referenced secrets...")
-        for mount_config in secret_volume_mount_configs:
-            secret_name = mount_config.get("secret_name")
-            key_in_secret = mount_config.get("key_in_secret")
-            if not secret_name or not key_in_secret:
-                print(f"❌ Validation Error: Malformed secret mount configuration. Missing 'secret_name' or 'key_in_secret'. Config: {mount_config}")
-                return False
-
-            try:
-                # Intenta leer el secreto para verificar su existencia
-                secret_obj = core_api.read_namespaced_secret(name=secret_name, namespace=namespace)
-
-                # Verifica si la clave existe en los datos del secreto (stringData o data)
-                key_found = False
-                if secret_obj.data and key_in_secret in secret_obj.data:
-                    key_found = True
-                if secret_obj.string_data and key_in_secret in secret_obj.string_data:
-                    key_found = True
-
-                if not key_found:
-                    print(f"❌ Validation Error: Key '{key_in_secret}' not found in Secret '{secret_name}' in namespace '{namespace}'.")
-                    return False
-                print(f"✅ Secret '{secret_name}' and key '{key_in_secret}' validated successfully.")
-
-            except ApiException as e:
-                if e.status == 404:
-                    print(f"❌ Validation Error: Secret '{secret_name}' not found in namespace '{namespace}'. Cannot create Job.")
-                else:
-                    _print_api_exception_details(e, f"Error validating Secret '{secret_name}' in namespace '{namespace}'")
-                return False
-            except Exception as e:
-                print(f"❌ Unexpected error during secret validation for '{secret_name}': {type(e).__name__} - {e}")
-                traceback.print_exc()
-                return False
-    # --- FIN DE LA NUEVA LÓGICA DE VALIDACIÓN ---
+    core_api = get_api_client() 
+    batch_v1_api = client.BatchV1Api(core_api.api_client) 
 
     all_volumes = []
     all_container_volume_mounts = []
 
-    # 1. Volumen para el ConfigMap del script) ...
+    # 1. Volumen para el ConfigMap del script
     script_volume_name = f"script-vol-{_sanitize_for_k8s_name(script_configmap_name)}"[:63]
     script_volume_obj = client.V1Volume(
         name=script_volume_name,
@@ -395,7 +381,7 @@ def create_k8s_job(job_name: str, namespace: str, image: str,
     all_volumes.append(script_volume_obj)
     script_volume_mount_obj = client.V1VolumeMount(name=script_volume_name, mount_path=script_mount_path)
     all_container_volume_mounts.append(script_volume_mount_obj)
-
+    
     # 2. Volúmenes para Secretos adicionales
     if secret_volume_mount_configs:
         for i, mount_config in enumerate(secret_volume_mount_configs):
@@ -420,30 +406,29 @@ def create_k8s_job(job_name: str, namespace: str, image: str,
     main_container_name = f"{job_name}-container" # Usaremos este nombre en podFailurePolicy
 
     container_spec = client.V1Container(
-        name=main_container_name,
+        name=main_container_name, 
         image=image,
-        command=container_command, # <--- ¡Esta línea es la que falta!
         args=container_args,
-        env=env_vars if env_vars else [],
-        volume_mounts=all_container_volume_mounts
+        env=env_vars if env_vars else [], 
+        volume_mounts=all_container_volume_mounts 
     )
 
     pod_template_spec = client.V1PodTemplateSpec(
         metadata=client.V1ObjectMeta(labels={"app": job_name, "kubesol-job": "true"}),
         spec=client.V1PodSpec(
-            restart_policy=pod_restart_policy,
+            restart_policy=pod_restart_policy, 
             containers=[container_spec],
-            volumes=all_volumes
+            volumes=all_volumes 
         )
     )
 
     # --- Definir PodFailurePolicy ---
     # Falla el Job si el contenedor principal sale con códigos de error comunes de arranque.
     on_exit_codes_rule = client.V1PodFailurePolicyRule(
-        action="FailJob",
+        action="FailJob", 
         on_exit_codes=client.V1PodFailurePolicyOnExitCodesRequirement(
             container_name=main_container_name, # Referencia al nombre del contenedor principal
-            operator="In",
+            operator="In",      
             values=[
                 1,    # Error genérico
                 126,  # Comando invocado no ejecutable (ej. error de permisos)
@@ -452,15 +437,21 @@ def create_k8s_job(job_name: str, namespace: str, image: str,
             ]
         )
     )
+    # Podrías añadir más reglas aquí, por ejemplo para PodConditions como "Unschedulable"
+    # o para fallos de montaje de volumen si la API lo soporta directamente en PodFailurePolicy.
+    # Los eventos de FailedMount son a nivel de Pod, no directamente un exit code del container,
+    # pero un FailedMount persistente llevará a que el Pod no pueda iniciar el container,
+    # y el Job debería fallar por el backoffLimit o activeDeadlineSeconds.
+    # La regla onExitCodes ayuda si el container *logra* empezar pero falla inmediatamente.
     
     pod_failure_policy_config = client.V1PodFailurePolicy(rules=[on_exit_codes_rule])
 
     # Define Job Spec
     job_spec = client.V1JobSpec(
         template=pod_template_spec,
-        backoff_limit=job_backoff_limit,
+        backoff_limit=job_backoff_limit, 
         active_deadline_seconds=job_active_deadline_seconds,
-        pod_failure_policy=pod_failure_policy_config
+        pod_failure_policy=pod_failure_policy_config # Aplicar la política de fallo del pod
     )
 
     job_object = client.V1Job(
@@ -485,13 +476,13 @@ def create_k8s_job(job_name: str, namespace: str, image: str,
 
         current_batch_v1_api = client.BatchV1Api(get_api_client().api_client)
         current_batch_v1_api.create_namespaced_job(body=job_object, namespace=namespace)
-
+        
         print(f"✅ Job '{job_name}' created in namespace '{namespace}'.")
         return True
     except ApiException as e:
         _print_api_exception_details(e, f"Error creating Job '{job_name}'")
         return False
-    except Exception as general_error:
+    except Exception as general_error: 
         print(f"🔥🔥🔥 UNEXPECTED ERROR in create_k8s_job for '{job_name}': {type(general_error).__name__} - {general_error}")
         traceback.print_exc()
         return False
@@ -603,36 +594,33 @@ def get_k8s_job_logs(job_name: str, namespace: str = DEFAULT_NAMESPACE, tail_lin
     
 # PROJECT MANAGEMENT FUNCTIONS
 
-def create_k8s_namespace(name: str, labels: dict = None) -> bool:
+def create_k8s_namespace(name: str, labels: dict = None, annotations: dict = None) -> bool:
     """
     Creates a Kubernetes namespace.
     Args:
         name: The name of the namespace to create.
         labels: A dictionary of labels to apply to the namespace.
+        annotations: A dictionary of annotations to apply to the namespace.
     Returns:
-        True if creation was successful or namespace already exists with same labels, False otherwise.
+        True if creation was successful or namespace already exists with same labels/annotations, False otherwise.
     """
     api = get_api_client() # CoreV1Api
     namespace_body = client.V1Namespace(
         api_version="v1",
         kind="Namespace",
-        metadata=client.V1ObjectMeta(name=name, labels=labels if labels else {})
+        metadata=client.V1ObjectMeta(name=name, labels=labels if labels else {}, annotations=annotations if annotations else {})
     )
     try:
         api.create_namespace(body=namespace_body)
-        print(f"✅ Namespace '{name}' created successfully with labels: {labels or {}}.")
+        print(f"✅ Namespace '{name}' created successfully with labels: {labels or {}} and annotations: {annotations or {}}.")
         return True
     except ApiException as e:
         if e.status == 409: # Conflict - Namespace already exists
             print(f"ℹ️ Namespace '{name}' already exists.")
-            # Optionally, check if labels match and update if necessary, or just return True.
-            # For simplicity now, if it exists, we consider it a "success" for this operation's intent.
-            # To be more robust, you might want to get the existing namespace and compare/patch labels.
-            # For now, let's try to patch labels if it already exists, to ensure they are set.
-            if labels:
-                print(f"   Attempting to ensure labels {labels} are set on existing namespace '{name}'...")
-                return update_k8s_namespace_labels(name, labels)
-            return True
+            # If it exists, we now attempt to patch labels and annotations.
+            print(f"   Attempting to ensure labels {labels} and annotations {annotations} are set on existing namespace '{name}'...")
+            return patch_k8s_namespace_metadata(name, labels=labels, annotations=annotations)
+
         _print_api_exception_details(e, f"Error creating namespace '{name}'")
         return False
     except Exception as ex_general:
@@ -640,7 +628,6 @@ def create_k8s_namespace(name: str, labels: dict = None) -> bool:
         import traceback
         traceback.print_exc()
         return False
-
 
 def get_k8s_namespace(name: str) -> client.V1Namespace | None:
     """
@@ -731,27 +718,41 @@ def update_k8s_namespace_labels(namespace_name: str, labels_to_set: dict) -> boo
     Returns:
         True if successful, False otherwise.
     """
+    return patch_k8s_namespace_metadata(namespace_name, labels=labels_to_set)
+
+def patch_k8s_namespace_metadata(namespace_name: str, labels: dict = None, annotations: dict = None) -> bool:
+    """
+    Patches labels and/or annotations on a given namespace.
+    Args:
+        namespace_name: The name of the namespace to update.
+        labels: A dictionary of labels to set/update (use None to skip labels).
+        annotations: A dictionary of annotations to set/update (use None to skip annotations).
+    Returns:
+        True if successful, False otherwise.
+    """
     api = get_api_client()
     try:
-        # To add/update labels without removing existing ones, we patch.
-        # The body of the patch should be a V1Namespace object with just the metadata.labels field set.
-        patch_body = {
-            "metadata": {
-                "labels": labels_to_set
-            }
-        }
-        # Using strategic merge patch. For labels, this should add/overwrite.
+        patch_body = {"metadata": {}}
+        if labels is not None:
+            patch_body["metadata"]["labels"] = labels
+        if annotations is not None:
+            patch_body["metadata"]["annotations"] = annotations
+
+        if not patch_body["metadata"]: # Nothing to patch
+            print(f"ℹ️ No labels or annotations provided to patch for namespace '{namespace_name}'.")
+            return True
+
         api.patch_namespace(name=namespace_name, body=patch_body)
-        print(f"✅ Labels {labels_to_set} successfully patched onto namespace '{namespace_name}'.")
+        print(f"✅ Metadata (labels: {labels}, annotations: {annotations}) successfully patched onto namespace '{namespace_name}'.")
         return True
     except ApiException as e:
         if e.status == 404:
-            print(f"🤷 Namespace '{namespace_name}' not found for label update.")
+            print(f"🤷 Namespace '{namespace_name}' not found for metadata update.")
         else:
-            _print_api_exception_details(e, f"Error updating labels for namespace '{namespace_name}'")
+            _print_api_exception_details(e, f"Error patching metadata for namespace '{namespace_name}'")
         return False
     except Exception as ex_general:
-        print(f"🔥🔥🔥 UNEXPECTED ERROR in update_k8s_namespace_labels for '{namespace_name}': {type(ex_general).__name__} - {ex_general}")
+        print(f"🔥🔥🔥 UNEXPECTED ERROR in patch_k8s_namespace_metadata for '{namespace_name}': {type(ex_general).__name__} - {ex_general}")
         import traceback
         traceback.print_exc()
         return False

@@ -47,10 +47,10 @@ def handle_create_project(parsed_args: dict, context: KubeSolContext):
                 context.set_project_env_context(user_proj_name, proj_id, def_env, def_ns)
 
 def handle_create_environment(parsed_args: dict, context: KubeSolContext):
-    """Handles CREATE ENV <env_name> [FOR PROJECT <project_name> | FOR THIS PROJECT]"""
+    """Handles CREATE ENV <env_name> [FOR PROJECT <project_name> | FOR THIS PROJECT] [DEPENDING FROM ENV <parent_env_name>]"""
     env_name_to_create = parsed_args.get("env_name")
-    # 'project_name_specifier' will be the project name string or "THIS_PROJECT_CONTEXT"
-    project_specifier = parsed_args.get("project_name_specifier") 
+    project_specifier = parsed_args.get("project_name_specifier")
+    parent_env_name = parsed_args.get("parent_env_name") # <--- Capturar el nombre del entorno padre
 
     if not env_name_to_create:
         print("❌ Error: Environment name must be provided for CREATE ENV.")
@@ -60,20 +60,19 @@ def handle_create_environment(parsed_args: dict, context: KubeSolContext):
     target_user_project_name = None
 
     if project_specifier:
-        if project_specifier.upper() == "THIS_PROJECT_CONTEXT": # Check against the marker from transformer
+        if project_specifier.upper() == "THIS_PROJECT_CONTEXT":
             if not context.is_project_context_active():
                 print("❌ 'FOR THIS PROJECT' specified, but no KubeSol project context is currently set.")
                 print("   Use 'USE PROJECT <name> ENV <name>' first, or specify 'FOR PROJECT <name>'.")
                 return
             target_project_id = context.project_id
-            target_user_project_name = context.user_project_name 
-        else: # A specific project name was given
+            target_user_project_name = context.user_project_name
+        else:
             target_user_project_name = project_specifier
             target_project_id = manager._resolve_project_id_from_display_name(target_user_project_name)
             if not target_project_id:
-                # manager._resolve_project_id_from_display_name prints "not found" or "ambiguous"
                 return
-    else: # FOR PROJECT clause was omitted - use current context if active
+    else:
         if not context.is_project_context_active():
             print("❌ Project not specified for CREATE ENV and no active KubeSol project context.")
             print("   Use 'FOR PROJECT <name>' or set a context with 'USE PROJECT ... ENV ...' first.")
@@ -86,10 +85,12 @@ def handle_create_environment(parsed_args: dict, context: KubeSolContext):
         print("❌ Internal Error: Could not determine target project ID or display name for creating environment.")
         return
 
+    # Llamar a la función del manager con el nuevo parámetro parent_env_name
     manager.add_environment_to_project(
-        project_id=target_project_id, 
-        user_project_name=target_user_project_name, 
-        new_env_name=env_name_to_create
+        project_id=target_project_id,
+        user_project_name=target_user_project_name,
+        new_env_name=env_name_to_create,
+        parent_env_name=parent_env_name # <--- Pasar el entorno padre
     )
 
 def handle_list_projects(parsed_args: dict, context: KubeSolContext):
