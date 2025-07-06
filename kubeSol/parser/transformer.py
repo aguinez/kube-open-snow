@@ -263,8 +263,9 @@ class KubeTransformer(Transformer):
         return parent_env_name_str
 
     @v_args(inline=True)
-    def depends_on_clause(self, depends_literal, on_literal, env_name_str):
+    def depends_on_clause(self, env_name_str):
         # Este método devuelve solo el nombre del entorno del cual depende
+        # Los literales "DEPENDS" y "ON" son ignorados por Lark cuando son strings literales
         return env_name_str
 
     @v_args(inline=True) 
