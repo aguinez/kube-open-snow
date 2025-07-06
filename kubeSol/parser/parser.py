@@ -110,8 +110,9 @@ sql_grammar = r"""
     project_target_clause_this_project_ref: THIS_KW PROJECT_KW -> this_project_transformer
     project_target_clause: (FOR_KW | FROM_KW) (project_target_clause_project_name_ref | project_target_clause_this_project_ref)
     depending_from_clause: DEPENDING_KW FROM_KW ENV_KW NAME -> depending_from_clause
+    depends_on_clause: "DEPENDS"i "ON"i NAME -> depends_on_clause
 
-    create_env_command: CREATE_KW ENV_KW NAME [project_target_clause] -> create_env_cmd
+    create_env_command: CREATE_KW ENV_KW NAME [project_target_clause] [depends_on_clause] -> create_env_cmd
 
     list_projects_command: LIST_KW PROJECT_KW "S"? -> list_projects_cmd 
 

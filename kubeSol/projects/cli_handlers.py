@@ -47,10 +47,10 @@ def handle_create_project(parsed_args: dict, context: KubeSolContext):
                 context.set_project_env_context(user_proj_name, proj_id, def_env, def_ns)
 
 def handle_create_environment(parsed_args: dict, context: KubeSolContext):
-    """Handles CREATE ENV <env_name> [FOR PROJECT <project_name> | FOR THIS PROJECT] [DEPENDING FROM ENV <parent_env_name>]"""
+    """Handles CREATE ENV <env_name> [FOR PROJECT <project_name> | FOR THIS PROJECT] [DEPENDS ON <parent_env_name>]"""
     env_name_to_create = parsed_args.get("env_name")
     project_specifier = parsed_args.get("project_name_specifier")
-    parent_env_name = parsed_args.get("parent_env_name") # <--- Capturar el nombre del entorno padre
+    depends_on_env_name = parsed_args.get("depends_on_env") # <--- Capturar el nombre del entorno del cual depende
 
     if not env_name_to_create:
         print("❌ Error: Environment name must be provided for CREATE ENV.")
@@ -85,12 +85,12 @@ def handle_create_environment(parsed_args: dict, context: KubeSolContext):
         print("❌ Internal Error: Could not determine target project ID or display name for creating environment.")
         return
 
-    # Llamar a la función del manager con el nuevo parámetro parent_env_name
+    # Llamar a la función del manager con el nuevo parámetro depends_on_env_name
     manager.add_environment_to_project(
         project_id=target_project_id,
         user_project_name=target_user_project_name,
         new_env_name=env_name_to_create,
-        parent_env_name=parent_env_name # <--- Pasar el entorno padre
+        depends_on_env_name=depends_on_env_name # <--- Pasar el entorno del cual depende
     )
 
 def handle_list_projects(parsed_args: dict, context: KubeSolContext):

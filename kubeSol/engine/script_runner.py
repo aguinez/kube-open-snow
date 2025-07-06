@@ -145,7 +145,8 @@ def run_script_as_k8s_job(
         container_command=container_command_list,
         container_args=script_cmd_args,
         env_vars=job_env_vars,
-        secret_volume_mount_configs=secret_mounts
+        secret_volume_mount_configs=secret_mounts,
+        job_active_deadline_seconds=60
     )
 
     if job_created:

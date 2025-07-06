@@ -77,5 +77,8 @@ GITHUB_SCRIPTS_FOLDER = "scripts"                      # Carpeta donde se guarda
 PROJECT_REPO_NAME_LABEL_KEY = "kubesol.io/github-repo-name" # Nombre del repositorio de GitHub
 PROJECT_REPO_URL_ANNOTATION_KEY = "kubesol.io/github-repo-url"   # URL del repositorio de GitHub
 
+# Label para almacenar dependencias entre ambientes
+ENVIRONMENT_DEPENDS_ON_LABEL_KEY = "kubesol.io/depends-on"  # Almacena el nombre del ambiente del cual depende este ambiente
+
 # --- New Action Type for Promote ---
 ACTION_PROMOTE = "PROMOTE"

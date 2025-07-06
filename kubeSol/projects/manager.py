@@ -16,7 +16,8 @@ from kubeSol.constants import (
     GITHUB_DEV_BRANCH_NAME,
     PROJECT_REPO_NAME_LABEL_KEY,
     GITHUB_SCRIPTS_FOLDER,
-    PROJECT_REPO_URL_ANNOTATION_KEY
+    PROJECT_REPO_URL_ANNOTATION_KEY,
+    ENVIRONMENT_DEPENDS_ON_LABEL_KEY
 )
 from kubeSol.integrations import github_api
 
@@ -156,8 +157,9 @@ def create_new_project(user_project_name: str) -> tuple[str | None, str | None, 
     return None, None, None, None
 
 
-def add_environment_to_project(project_id: str, user_project_name: str, new_env_name: str, parent_env_name: str | None = None) -> str | None:
-    print(f"Attempting to add environment '{new_env_name}' to project '{user_project_name}' (ID: {project_id})...")
+def add_environment_to_project(project_id: str, user_project_name: str, new_env_name: str, depends_on_env_name: str | None = None) -> str | None:
+    depends_msg = f" depending on '{depends_on_env_name}'" if depends_on_env_name else ""
+    print(f"Attempting to add environment '{new_env_name}'{depends_msg} to project '{user_project_name}' (ID: {project_id})...")
     if not project_id or not user_project_name:
         print("❌ Internal Error: Project ID or Project Name not provided to add_environment_to_project.")
         return None
@@ -183,30 +185,43 @@ def add_environment_to_project(project_id: str, user_project_name: str, new_env_
               "Please ensure the project's namespaces are correctly labeled/annotated.")
         return None
 
-    new_env_git_branch_name = _get_github_branch_name_for_env(new_env_name)
+    # Validación: Si se especifica depends_on_env_name, verificar que existe
     base_git_branch_name = GITHUB_DEFAULT_BRANCH_NAME
+    if depends_on_env_name:
+        # Verificar que el ambiente del cual depende existe
+        depends_on_namespace = _get_physical_namespace_name(project_id, depends_on_env_name)
+        depends_on_ns = k8s_api.get_k8s_namespace(depends_on_namespace)
+        if not depends_on_ns:
+            print(f"❌ Error: Environment '{depends_on_env_name}' does not exist in project '{user_project_name}'. Cannot create environment that depends on non-existent environment.")
+            return None
+        
+        # Verificar que las etiquetas coinciden con el proyecto
+        depends_on_labels = depends_on_ns.metadata.labels
+        if not (depends_on_labels and 
+                depends_on_labels.get(PROJECT_ID_LABEL_KEY) == project_id and 
+                depends_on_labels.get(ENVIRONMENT_LABEL_KEY) == depends_on_env_name):
+            print(f"❌ Error: Environment '{depends_on_env_name}' namespace labels don't match project '{user_project_name}' (ID: {project_id}).")
+            return None
+        
+        base_git_branch_name = _get_github_branch_name_for_env(depends_on_env_name)
+        print(f"ℹ️ Environment '{new_env_name}' will depend on '{depends_on_env_name}'. Using branch '{base_git_branch_name}' as base.")
 
-    if parent_env_name:
-        base_git_branch_name = _get_github_branch_name_for_env(parent_env_name)
-        print(f"ℹ️ Creating GitHub branch '{new_env_git_branch_name}' based on parent environment '{parent_env_name}' (Git branch: '{base_git_branch_name}')...")
-        if not github_api.create_github_branch(
-            repo_name=project_repo_name,
-            branch_name=new_env_git_branch_name,
-            base_branch=base_git_branch_name
-        ):
-            print(f"❌ Failed to create GitHub branch '{new_env_git_branch_name}' from '{base_git_branch_name}'. Aborting environment creation.")
-            return None
-        print(f"✅ GitHub branch '{new_env_git_branch_name}' created in '{project_repo_name}'.")
+    new_env_git_branch_name = _get_github_branch_name_for_env(new_env_name)
+
+    # Crear la rama de GitHub basada en la dependencia o rama por defecto
+    if depends_on_env_name:
+        print(f"ℹ️ Creating GitHub branch '{new_env_git_branch_name}' based on environment '{depends_on_env_name}' (Git branch: '{base_git_branch_name}')...")
     else:
-        print(f"ℹ️ No parent environment specified. Creating GitHub branch '{new_env_git_branch_name}' from default branch '{GITHUB_DEFAULT_BRANCH_NAME}'...")
-        if not github_api.create_github_branch(
-            repo_name=project_repo_name,
-            branch_name=new_env_git_branch_name,
-            base_branch=GITHUB_DEFAULT_BRANCH_NAME
-        ):
-            print(f"❌ Failed to create GitHub branch '{new_env_git_branch_name}' from '{GITHUB_DEFAULT_BRANCH_NAME}'. Aborting environment creation.")
-            return None
-        print(f"✅ GitHub branch '{new_env_git_branch_name}' created in '{project_repo_name}'.")
+        print(f"ℹ️ No dependency specified. Creating GitHub branch '{new_env_git_branch_name}' from default branch '{GITHUB_DEFAULT_BRANCH_NAME}'...")
+    
+    if not github_api.create_github_branch(
+        repo_name=project_repo_name,
+        branch_name=new_env_git_branch_name,
+        base_branch=base_git_branch_name
+    ):
+        print(f"❌ Failed to create GitHub branch '{new_env_git_branch_name}' from '{base_git_branch_name}'. Aborting environment creation.")
+        return None
+    print(f"✅ GitHub branch '{new_env_git_branch_name}' created in '{project_repo_name}'.")
 
     labels = {
         PROJECT_ID_LABEL_KEY: project_id,
@@ -214,12 +229,17 @@ def add_environment_to_project(project_id: str, user_project_name: str, new_env_
         ENVIRONMENT_LABEL_KEY: new_env_name,
         PROJECT_REPO_NAME_LABEL_KEY: project_repo_name, # <--- Sigue siendo LABEL
     }
+    
+    # Agregar la etiqueta de dependencia si se especificó
+    if depends_on_env_name:
+        labels[ENVIRONMENT_DEPENDS_ON_LABEL_KEY] = depends_on_env_name
     annotations = { # <--- NUEVO: Las URLs como ANOTACIONES
         PROJECT_REPO_URL_ANNOTATION_KEY: project_repo_url #
     }
 
     if k8s_api.create_k8s_namespace(name=namespace_name, labels=labels, annotations=annotations): # <--- Pasar annotations
-        print(f"✅ Environment '{new_env_name}' created for project '{user_project_name}' (Namespace: '{namespace_name}').")
+        dependency_info = f" (depends on '{depends_on_env_name}')" if depends_on_env_name else ""
+        print(f"✅ Environment '{new_env_name}'{dependency_info} created for project '{user_project_name}' (Namespace: '{namespace_name}').")
         print(f"   Associated GitHub branch: {new_env_git_branch_name}")
         return namespace_name
     

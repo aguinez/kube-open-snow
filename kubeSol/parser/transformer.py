@@ -249,18 +249,23 @@ class KubeTransformer(Transformer):
         return project_specifier 
 
     @v_args(inline=True)
-    def create_env_cmd(self, create_kw_val, env_keyword_val, env_name_str, project_specifier=None, parent_env_name_str=None):
-        # parent_env_name_str será None si la cláusula DEPENDING FROM no está presente
+    def create_env_cmd(self, create_kw_val, env_keyword_val, env_name_str, project_specifier=None, depends_on_env_name=None):
+        # depends_on_env_name será None si la cláusula DEPENDS ON no está presente
         return {"action": constants.ACTION_CREATE_ENV, "type": constants.LOGICAL_TYPE_ENVIRONMENT,
                 "env_name": env_name_str.lower(),
                 "project_name_specifier": project_specifier,
-                "parent_env_name": parent_env_name_str.lower() if parent_env_name_str else None # Asegurarse de que sea minúsculas
+                "depends_on_env": depends_on_env_name.lower() if depends_on_env_name else None
                 }
 
     @v_args(inline=True)
     def depending_from_clause(self, depending_kw_val, from_kw_val, env_kw_val, parent_env_name_str):
         # Este método devuelve solo el nombre del entorno padre
         return parent_env_name_str
+
+    @v_args(inline=True)
+    def depends_on_clause(self, depends_literal, on_literal, env_name_str):
+        # Este método devuelve solo el nombre del entorno del cual depende
+        return env_name_str
 
     @v_args(inline=True) 
     def list_projects_cmd(self, list_kw_val, project_keyword_val, plural_s_token=None):
