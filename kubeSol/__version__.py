@@ -1,4 +1,2 @@
-try:
-    from kubeSol import __version__ as kubesol_version
-except ImportError:
-    kubesol_version = "0.0.0-dev"
+# kubeSol/__version__.py
+__version__ = "0.1.0" # O cualquier número de versión

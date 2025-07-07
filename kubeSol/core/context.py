@@ -1,9 +1,9 @@
-# kubeSol/projects/context.py
+# kubesol/core/context.py
 """
 Manages the current operational context (project, environment, namespace) for KubeSol.
 An instance of KubeSolContext will be managed by the main shell.
 """
-from kubeSol.constants import DEFAULT_NAMESPACE #
+from kubesol.constants import DEFAULT_NAMESPACE
 
 class KubeSolContext:
     def __init__(self):
@@ -64,7 +64,7 @@ class KubeSolContext:
         """Returns the continuation prompt string for multi-line input."""
         return f"{self.prompt_prefix} ... "
 
-    def is_project_context_active(self) -> bool: # << इंश्योर THIS METHOD EXISTS
+    def is_project_context_active(self) -> bool:
         """Checks if a KubeSol project context (ID and name) is currently active."""
         return bool(self.project_id and self.user_project_name)
 

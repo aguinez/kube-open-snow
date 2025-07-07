@@ -1,25 +1,28 @@
-# kubeSol/projects/manager.py
+# kubesol/modules/projects/manager.py
 """
 Core logic for managing KubeSol projects and environments.
 Interacts with the k8s_api module to manipulate namespaces and their labels.
 """
 import uuid
-import re # Import re for sanitizing environment names in _get_physical_namespace_name
-from kubeSol.engine import k8s_api 
-from kubeSol.constants import (
-    PROJECT_ID_LABEL_KEY, 
-    PROJECT_NAME_LABEL_KEY, 
+import re
+
+# Actualizado: Importaciones para k8s_api y github_api desde sus nuevas ubicaciones
+from kubesol.core import k8s_api
+from kubesol.core import github_api
+
+from kubesol.constants import ( #
+    PROJECT_ID_LABEL_KEY,
+    PROJECT_NAME_LABEL_KEY,
     ENVIRONMENT_LABEL_KEY,
     DEFAULT_PROJECT_ENVIRONMENT,
     GITHUB_REPO_PREFIX,
     GITHUB_DEFAULT_BRANCH_NAME,
     GITHUB_DEV_BRANCH_NAME,
     PROJECT_REPO_NAME_LABEL_KEY,
-    GITHUB_SCRIPTS_FOLDER,
     PROJECT_REPO_URL_ANNOTATION_KEY,
     ENVIRONMENT_DEPENDS_ON_LABEL_KEY
 )
-from kubeSol.integrations import github_api
+
 
 # --- Internal Helper Functions ---
 
@@ -247,15 +250,9 @@ def add_environment_to_project(project_id: str, user_project_name: str, new_env_
     return None
 
 def update_project_display_name_label(old_display_name: str, new_display_name: str) -> bool:
-    # ... (lógica existente, añadir update del repo name en GitHub si el repo name también cambia,
-    # aunque no es común renombrar repos de GitHub al cambiar el display name)
-    # Por ahora, solo se actualiza la etiqueta en los namespaces. El nombre del repo de GitHub
-    # se mantiene como el original.
-    # Si quisieras renombrar el repo de GitHub, sería una operación separada y compleja en la API de GitHub.
-    # ... (resto de la función)
     if old_display_name == new_display_name:
         print(f"ℹ️ New display name ('{new_display_name}') is the same as the old one ('{old_display_name}'). No update performed.")
-        return True # No change needed, considered a success.
+        return True
 
     print(f"Attempting to update project display name from '{old_display_name}' to '{new_display_name}'...")
 
@@ -282,9 +279,6 @@ def update_project_display_name_label(old_display_name: str, new_display_name: s
 
     for ns_obj in namespaces_to_update:
         ns_name = ns_obj.metadata.name
-        # También actualiza el PROJECT_REPO_NAME_LABEL_KEY si el nombre del repositorio depende del display_name
-        # Pero el nombre del repo se basa en el nombre del proyecto original, no cambia con el display name.
-        # Solo actualizamos el label PROJECT_NAME_LABEL_KEY
         if k8s_api.update_k8s_namespace_labels(ns_name, {PROJECT_NAME_LABEL_KEY: new_display_name}):
             updated_ns_count += 1
         else:
@@ -318,34 +312,30 @@ def get_all_project_details() -> list[dict]:
                     if proj_name_label:
                          projects_data[proj_id]["display_names"].add(proj_name_label)
                     if env_name_label:
-                        projects_data[proj_id]["environments"].add(env_name_label) # Almacenar nombres de entorno
+                        projects_data[proj_id]["environments"].add(env_name_label)
     
     output_list = []
     for proj_id, data in projects_data.items():
         display_name_str = ", ".join(sorted(list(data["display_names"]))) if data["display_names"] else "[No Display Name Label]"
         if len(data["display_names"]) > 1: display_name_str += " (Warning: Inconsistent display names for this ID)"
         
-        # MODIFICADO: Añadir lista de nombres de entornos
         environment_names_list = sorted(list(data["environments"]))
         
         output_list.append({
             "project_id": proj_id, 
             "project_display_name": display_name_str,
             "environment_count": len(environment_names_list),
-            "environment_names": environment_names_list # NUEVA CLAVE
+            "environment_names": environment_names_list
         })
             
     return sorted(output_list, key=lambda x: x["project_display_name"])
 
 def get_environments_for_project(user_project_name: str) -> list[dict] | None:
-    # user_project_name ya viene en minúsculas
-    # ... (lógica como antes, ya debería funcionar con nombres en minúsculas para la búsqueda por etiquetas) ...
     project_id = _resolve_project_id_from_display_name(user_project_name)
     if not project_id: return None 
     label_selector_for_id = f"{PROJECT_ID_LABEL_KEY}={project_id}"
     namespaces = k8s_api.list_k8s_namespaces(label_selector=label_selector_for_id)
     environments_info = []
-    # ... (el resto de la función como estaba, ya que obtiene los valores de las etiquetas, que ahora serán minúsculas) ...
     if namespaces:
         for ns_obj in namespaces:
             labels = ns_obj.metadata.labels
@@ -374,8 +364,8 @@ def delete_whole_project(user_project_name: str, force_delete: bool = False) -> 
         first_ns_labels = namespaces_to_delete[0].metadata.labels
         project_repo_name = first_ns_labels.get(PROJECT_REPO_NAME_LABEL_KEY)
         
-        first_ns_annotations = namespaces_to_delete[0].metadata.annotations # NUEVO
-        project_repo_url = first_ns_annotations.get(PROJECT_REPO_URL_ANNOTATION_KEY) # NUEVO
+        first_ns_annotations = namespaces_to_delete[0].metadata.annotations
+        project_repo_url = first_ns_annotations.get(PROJECT_REPO_URL_ANNOTATION_KEY)
 
     if not namespaces_to_delete:
         print(f"ℹ️ No environments for project '{user_project_name}' (ID: {project_id}). Nothing to delete."); return True
@@ -409,12 +399,12 @@ def delete_project_environment(project_id: str, user_project_name_for_msg: str, 
         print(f"❌ NS '{namespace_name}' for env '{env_name}' of project '{user_project_name_for_msg}' not found."); return False
     
     labels = ns_obj.metadata.labels
-    annotations = ns_obj.metadata.annotations # NUEVO: Obtener anotaciones
+    annotations = ns_obj.metadata.annotations
     if not (labels and labels.get(PROJECT_ID_LABEL_KEY) == project_id and labels.get(ENVIRONMENT_LABEL_KEY) == env_name):
         print(f"❌ Safety check: NS '{namespace_name}' labels don't match project ID '{project_id}' / env '{env_name}'. Labels: {labels}. Aborting."); return False
 
     project_repo_name = labels.get(PROJECT_REPO_NAME_LABEL_KEY)
-    project_repo_url = annotations.get(PROJECT_REPO_URL_ANNOTATION_KEY) # NUEVO: Obtener URL de anotación
+    project_repo_url = annotations.get(PROJECT_REPO_URL_ANNOTATION_KEY)
     env_git_branch_name = _get_github_branch_name_for_env(env_name)
 
     if not force_delete:
@@ -436,6 +426,4 @@ def resolve_project_and_environment_namespaces(user_project_name: str, environme
     physical_namespace = _get_physical_namespace_name(project_id, environment_name)
     ns_obj = k8s_api.get_k8s_namespace(physical_namespace)
     if not ns_obj: return project_id, user_project_name, None, f"Env '{environment_name}' (NS '{physical_namespace}') not found for project '{user_project_name}' (ID: {project_id})."
-    # Consistency check for labels (optional, for stricter validation)
-    # ...
     return project_id, user_project_name, physical_namespace, None

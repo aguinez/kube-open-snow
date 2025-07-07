@@ -1,10 +1,9 @@
-# kubeSol/__init__.py
-"""
-KubeSol: A SQL-like interface for managing and executing tasks on Kubernetes,
-now with Jupyter Notebook integration.
-"""
-__version__ = "0.2.0" # Or your current project version
-
-# You can also expose high-level components of KubeSol here if desired, for example:
-# from .parser import parse_sql
-# from .engine.executor import execute_command
+# kubesol/__init__.py
+from .__version__ import __version__
+from kubesol.dispatch.command_registry import global_command_registry
+try:
+    from kubesol import modules
+    modules.load_all_command_modules()
+    print(f"INFO: KubeSol modules loaded. Version: {__version__}")
+except Exception as e:
+    print(f"CRITICAL ERROR: Failed to load KubeSol command modules: {e}")
