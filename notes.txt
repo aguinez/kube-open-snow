@@ -1,0 +1,6 @@
+CREATE SECRET my-test-secret FROM FILE './workspace/project/secrets/my-secret-data.json';
+GET SECRET my-test-secret;
+UPDATE SECRET my-test-secret FROM FILE './workspace/project/secrets/my-updated-secret-data.json';
+
+
+EXECUTE SCRIPT FROM FILE './workspace/project/scripts/my_test_script.py';

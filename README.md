@@ -8,6 +8,7 @@ Projects
 - UPDATE PROJECT (PERMITE ACTUALIZAR EL DISPLAY NAME, ES DECIR LAS ETIQUETAS DEL NAMESPACE)
 PENDIENTE:
 - CADA AMBIENTE DEBE PODER FUNCIONAR EN UN CLUSTER DISTINTO DE SER NECESARIO
+- GIT CLONE al crear un proyecto, debe vivir en un directorio de nivel superior de proyectos
 
 proximos modulos:
 

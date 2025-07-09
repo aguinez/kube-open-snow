@@ -1,0 +1,4 @@
+MY_PARAM_DB_HOST: "database.example.com"
+MY_PARAM_DB_PORT: 5432
+MY_PARAM_USERNAME: "dev_user"
+MY_PARAM_LOG_LEVEL: "INFO"

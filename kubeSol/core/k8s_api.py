@@ -1,4 +1,3 @@
-# kubesol/core/k8s_api.py (Contenido original de kubeSol/engine/k8s_api.py, con import de constants actualizado)
 from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
 from kubesol.constants import ( # Actualizado a 'kubesol.constants'
@@ -117,7 +116,7 @@ def create_secret_with_mixed_data(name: str,
     """
     api = get_api_client()
     metadata = client.V1ObjectMeta(name=name, namespace=namespace)
-
+    
     secret_body = client.V1Secret(
         api_version="v1",
         kind="Secret",
@@ -136,16 +135,23 @@ def create_secret_with_mixed_data(name: str,
         _print_api_exception_details(e, f"Error creating Secret '{name}' with mixed data in namespace '{namespace}'")
 
 
-def delete_secret(name: str, namespace: str = DEFAULT_NAMESPACE): 
+def delete_secret(name: str, namespace: str = DEFAULT_NAMESPACE) -> bool: # <--- CAMBIO EN LA FIRMA: AÑADIDO '-> bool'
     api = get_api_client()
     try:
         api.delete_namespaced_secret(name=name, namespace=namespace)
         print(f"🗑️ Secret '{name}' deleted successfully from namespace '{namespace}'.")
+        return True # <--- CAMBIO AQUÍ: Retorna True en caso de éxito
     except ApiException as e:
         if e.status == 404: 
             print(f"🤷 Secret '{name}' not found in namespace '{namespace}'.")
+            return True # <--- CAMBIO AQUÍ: Si no se encuentra, se considera que ya está "borrado", retorna True
         else:
             _print_api_exception_details(e, f"Error deleting Secret '{name}' in namespace '{namespace}'")
+            return False # <--- CAMBIO AQUÍ: Retorna False en caso de otro error API
+    except Exception as e:
+        print(f"❌ Unexpected error deleting Secret '{name}': {type(e).__name__} - {e}")
+        traceback.print_exc()
+        return False # <--- CAMBIO AQUÍ: Retorna False en caso de error inesperado
 
 
 def update_secret(name: str, data: dict, namespace: str = DEFAULT_NAMESPACE): 
@@ -186,8 +192,10 @@ def create_configmap(name: str, data: dict, namespace: str = DEFAULT_NAMESPACE):
     try:
         api.create_namespaced_config_map(namespace=namespace, body=configmap_body)
         print(f"✅ ConfigMap '{name}' created successfully in namespace '{namespace}'.")
+        return True
     except ApiException as e:
         _print_api_exception_details(e, f"Error creating ConfigMap '{name}' in namespace '{namespace}'")
+        return False
 
 def delete_configmap(name: str, namespace: str = DEFAULT_NAMESPACE): 
     api = get_api_client()
@@ -410,7 +418,8 @@ def create_k8s_job(job_name: str, namespace: str, image: str,
     container_spec = client.V1Container(
         name=main_container_name, 
         image=image,
-        args=container_args,
+        command=container_command,
+        args=container_args if container_args else [],
         env=env_vars if env_vars else [], 
         volume_mounts=all_container_volume_mounts 
     )
@@ -542,20 +551,41 @@ def get_k8s_job_logs(job_name: str, namespace: str = DEFAULT_NAMESPACE, tail_lin
             return None
 
         container_name_in_pod = pod_to_log_from.spec.containers[0].name
-        if pod_to_log_from.status.phase == "Pending" or \
-           any(cs.state and cs.state.waiting and cs.state.waiting.reason == "ContainerCreating" 
-               for cs in pod_to_log_from.status.container_statuses or []):
-            print(f"ℹ️ Container '{container_name_in_pod}' in pod '{pod_name}' is still creating or pending. Logs might not be available yet.")
+        
+        # Check if container is ready for logs, but be more permissive
+        if pod_to_log_from.status.phase == "Pending":
+            return None  # Don't show message, just return None
+        
+        if pod_to_log_from.status.container_statuses:
+            container_status = pod_to_log_from.status.container_statuses[0]
+            if container_status.state and container_status.state.waiting:
+                if container_status.state.waiting.reason in ["ContainerCreating", "PodInitializing"]:
+                    return None  # Don't show message, just return None
 
         print(f"🪵 Fetching logs for pod '{pod_name}', container '{container_name_in_pod}' of Job '{job_name}'...")
-        log_string = core_api.read_namespaced_pod_log(
-            name=pod_name,
-            namespace=namespace,
-            container=container_name_in_pod,
-            tail_lines=tail_lines,
-            timestamps=True
-        )
-        return log_string
+        try:
+            log_string = core_api.read_namespaced_pod_log(
+                name=pod_name,
+                namespace=namespace,
+                container=container_name_in_pod,
+                tail_lines=tail_lines,
+                timestamps=False,  # Remove timestamps for cleaner output
+                follow=False  # Don't follow, just get current logs
+            )
+            return log_string
+        except Exception as log_error:
+            # Try again without tail_lines in case that's causing issues
+            try:
+                log_string = core_api.read_namespaced_pod_log(
+                    name=pod_name,
+                    namespace=namespace,
+                    container=container_name_in_pod,
+                    timestamps=False,
+                    follow=False
+                )
+                return log_string
+            except Exception:
+                return None
     except ApiException as e:
         _print_api_exception_details(e, f"Error getting logs for Job '{job_name}'")
         return None
@@ -564,6 +594,29 @@ def get_k8s_job_logs(job_name: str, namespace: str = DEFAULT_NAMESPACE, tail_lin
         import traceback
         traceback.print_exc()
         return None
+
+def delete_k8s_job(job_name: str, namespace: str = DEFAULT_NAMESPACE) -> bool:
+    """
+    Deletes a Kubernetes Job.
+    """
+    api_client_instance = get_api_client()
+    batch_v1_api = client.BatchV1Api(api_client_instance.api_client)
+    
+    try:
+        batch_v1_api.delete_namespaced_job(name=job_name, namespace=namespace)
+        print(f"🗑️ Job '{job_name}' deleted successfully from namespace '{namespace}'.")
+        return True
+    except ApiException as e:
+        if e.status == 404:
+            print(f"🤷 Job '{job_name}' not found in namespace '{namespace}' for deletion.")
+            return True  # Already deleted
+        else:
+            _print_api_exception_details(e, f"Error deleting Job '{job_name}' from namespace '{namespace}'")
+            return False
+    except Exception as e:
+        print(f"❌ Unexpected error deleting Job '{job_name}': {type(e).__name__} - {e}")
+        traceback.print_exc()
+        return False
 
 
 # PROJECT MANAGEMENT FUNCTIONS
